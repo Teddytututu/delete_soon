@@ -1,8 +1,80 @@
 import json
 from typing import Dict
 import os
+import sys
+import io
 import yaml
 from datetime import datetime
+import re
+from pathlib import Path
+
+# Import json_repair for robust JSON parsing from LLM outputs
+try:
+    import json_repair
+except ImportError:
+    json_repair = None
+
+
+class PlatformUtils:
+    """
+    Encapsulates platform-specific logic (Windows vs Linux/Mac).
+
+    Replaces scattered 'if sys.platform == "win32"' checks throughout the codebase.
+    Centralizes platform differences for easier maintenance and testing.
+
+    Usage:
+        PlatformUtils.set_console_encoding()
+        if PlatformUtils.is_windows():
+            # Windows-specific code
+    """
+
+    @staticmethod
+    def set_console_encoding():
+        """
+        Force UTF-8 encoding for console output.
+
+        Critical for Windows to prevent UnicodeEncodeError with special characters
+        (Chinese characters, emojis, etc.). Also configures stderr for error logs.
+
+        This method handles both modern Python (3.7+) with reconfigure() and
+        older versions requiring TextIOWrapper replacement.
+        """
+        if sys.platform == 'win32':
+            try:
+                # Python 3.7+ preferred method
+                sys.stdout.reconfigure(encoding='utf-8')
+                sys.stderr.reconfigure(encoding='utf-8')
+            except AttributeError:
+                # Fallback for older Python versions
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+                sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+    @staticmethod
+    def is_windows():
+        """Check if running on Windows platform."""
+        return sys.platform == 'win32'
+
+    @staticmethod
+    def is_linux():
+        """Check if running on Linux platform."""
+        return sys.platform.startswith('linux')
+
+    @staticmethod
+    def is_macos():
+        """Check if running on macOS platform."""
+        return sys.platform == 'darwin'
+
+    @staticmethod
+    def get_platform_name():
+        """Get human-readable platform name."""
+        if PlatformUtils.is_windows():
+            return 'Windows'
+        elif PlatformUtils.is_macos():
+            return 'macOS'
+        elif PlatformUtils.is_linux():
+            return 'Linux'
+        else:
+            return 'Unknown'
 
 
 def normalize_task_fields(task: Dict) -> Dict:
@@ -306,57 +378,164 @@ def load_config(args, config_path='config.yaml'):
 
 
 def get_info(args):
-    """Get experiment info and initialize logging system."""
-    # CRITICAL FIX: Correctly calculate project root to prevent path errors
-    # __file__ is at: MMAgent/utils/utils.py
-    # We need to go up 3 levels to reach: LLM-MM-Agent/
-    # Structure: LLM-MM-Agent/MMAgent/utils/utils.py
-    utils_dir = os.path.dirname(os.path.abspath(__file__))
-    mmagent_dir = os.path.dirname(utils_dir)  # MMAgent/
-    project_root = os.path.dirname(mmagent_dir)  # LLM-MM-Agent/
+    """
+    Get experiment info, resolve paths dynamically via config, and initialize logging.
 
-    problem_path = os.path.join(project_root, 'MMBench/problem/{}.json'.format(args.task))
-    config = load_config(args)
+    [NEW] Uses pathlib for modern cross-platform path handling and config-driven path resolution.
+    This eliminates hardcoded paths like 'MMBench/problem/' and allows flexible data location.
+    """
+    # 1. Resolve Project Root safely using pathlib
+    # current: LLM-MM-Agent/MMAgent/utils/utils.py
+    # parents: [0]=utils, [1]=MMAgent, [2]=LLM-MM-Agent (Root)
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parents[2]
 
-    # Use absolute paths for dataset and output directories
-    dataset_dir = os.path.join(project_root, 'MMBench/dataset/', args.task)
-    output_dir = os.path.join(project_root, 'MMAgent/output/{}'.format(config["method_name"]), args.task + '_{}'.format(datetime.now().strftime('%Y%m%d-%H%M%S')))
+    # 2. Load Config FIRST (to get path settings)
+    # Default to finding config.yaml in project root
+    config_path = project_root / 'config.yaml'
+    if not config_path.exists():
+        # Fallback to local execution dir
+        config_path = Path('config.yaml')
 
-    if not os.path.exists(output_dir):
-        mkdir(output_dir)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found at {config_path}")
 
-    # P0 FIX #2: Create all required subdirectories upfront to prevent FileNotFoundError
-    # This prevents "logs/debug/events.jsonl not found" and similar directory errors
-    # FIX 2026-01-16: Added 'markdown' and 'latex' to fix missing Stage 4 outputs
+    config = load_config(args, config_path=str(config_path))
+
+    # 3. Resolve Paths based on Config
+    paths_cfg = config.get('paths', {})
+
+    # Default to 'MMBench' inside project_root if not configured
+    data_root_name = paths_cfg.get('root_data', 'MMBench')
+    data_root = project_root / data_root_name
+
+    # Resolve Problem Path
+    # e.g., LLM-MM-Agent/MMBench/problem/task_id.json
+    problem_dir_name = paths_cfg.get('problem_dir', 'problem')
+    problem_path = data_root / problem_dir_name / f"{args.task}.json"
+
+    # Resolve Dataset Directory
+    # e.g., LLM-MM-Agent/MMBench/dataset/task_id/
+    dataset_dir_name = paths_cfg.get('dataset_dir', 'dataset')
+    dataset_dir = data_root / dataset_dir_name / args.task
+
+    # Resolve Output Directory
+    output_root_name = paths_cfg.get('output_root', 'MMAgent/output')
+    # Generate timestamped run directory
+    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    run_dir_name = f"{args.task}_{timestamp}"
+    output_dir = project_root / output_root_name / config["method_name"] / run_dir_name
+
+    # 4. Create Directories
+    # Use pathlib mkdir with parents=True for robust recursive creation
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create subdirectories
     required_subdirs = [
-        'logs',           # For main log files
-        'logs/debug',     # For JSONL events
-        'json',           # For solution JSON
-        'markdown',       # For Markdown reports (FIXED: was missing, caused no markdown output)
-        'latex',          # For LaTeX paper and PDF compilation (FIXED: was missing, caused no latex/pdf output)
-        'charts',         # For generated chart images
-        'code',           # For generated Python scripts
-        'evaluation',     # For quality evaluation reports
-        'usage'           # For runtime and API usage stats
+        'logs', 'logs/debug', 'json', 'markdown', 'latex',
+        'code', 'charts', 'evaluation', 'usage'
     ]
-
     for subdir in required_subdirs:
-        subdir_path = os.path.join(output_dir, subdir)
-        if not os.path.exists(subdir_path):
-            mkdir(subdir_path)
+        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
-    # Initialize logging system
-    experiment_id = f"{args.task}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    # 5. Initialize Logging
+    experiment_id = f"{args.task}_{timestamp}"
     from .logging_config import MMExperimentLogger
-    logger_manager = MMExperimentLogger(output_dir, experiment_id, console_level='INFO')
+    # Convert to string for LoggerManager compatibility
+    logger_manager = MMExperimentLogger(str(output_dir), experiment_id, console_level='INFO')
 
-    # Log experiment start
     main_logger = logger_manager.get_logger('main')
-    # CRITICAL FIX: Replace Unicode box-drawing characters with ASCII for Windows GBK compatibility
     main_logger.info(f"{'='*80}")
     main_logger.info(f"  MM-Agent Experiment: {args.task}")
-    main_logger.info(f"  Model: {config['model_name']}  |  Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    main_logger.info(f"  Root: {project_root}")
+    main_logger.info(f"  Data: {data_root}")
     main_logger.info(f"{'='*80}")
-    main_logger.info(f"Processing {problem_path}, config: {config}")
 
-    return problem_path, config, dataset_dir, output_dir, logger_manager
+    # Return strings for backward compatibility with rest of the code
+    return str(problem_path), config, str(dataset_dir), str(output_dir), logger_manager
+
+
+def robust_json_load(json_str: str):
+    """
+    CRITICAL FIX: Robustly parse JSON string from LLM output using json_repair.
+
+    This function provides a unified, robust JSON parsing mechanism for all LLM outputs
+    throughout the MM-Agent system. It handles common LLM JSON formatting issues:
+    - Markdown code blocks (```json ... ``` or ``` ... ```)
+    - Trailing commas (common LLM error)
+    - Missing quotes on keys
+    - Comments (// ... or /* ... */)
+    - Unescaped characters
+    - Incomplete brackets/quotes
+
+    Args:
+        json_str: Raw JSON string from LLM output
+
+    Returns:
+        Parsed Python dictionary/list, or None if input is empty
+
+    Raises:
+        ValueError: If JSON cannot be parsed after all fallback attempts
+
+    Example:
+        >>> broken_json = '''```json
+        ... { "name": "test", "items": [1, 2, 3,] }
+        ... ```'''
+        >>> result = robust_json_load(broken_json)
+        >>> result
+        {'name': 'test', 'items': [1, 2, 3]}
+
+    Migration Path:
+        - Replace all json.loads() on LLM output with robust_json_load()
+        - Remove Tier 1/2/3 fix methods from coordinator.py
+        - Remove manual regex replacement logic from task_solving.py
+    """
+    if not json_str:
+        return None
+
+    # Step 1: Strip Markdown code blocks (```json ... ```)
+    clean_str = json_str.strip()
+    if "```" in clean_str:
+        # Extract content inside the first code block if present
+        pattern = r"```(?:json)?\s*(.*?)```"
+        match = re.search(pattern, clean_str, re.DOTALL | re.IGNORECASE)
+        if match:
+            clean_str = match.group(1).strip()
+
+    # Step 2: Try standard json.loads first (fastest)
+    try:
+        return json.loads(clean_str)
+    except json.JSONDecodeError:
+        # Standard parsing failed, continue to more robust methods
+        pass
+
+    # Step 3: Fallback to json_repair (robust third-party library)
+    if json_repair:
+        try:
+            # json_repair can fix most common LLM JSON errors
+            decoded = json_repair.loads(clean_str)
+            return decoded
+        except Exception as e:
+            print(f"[DEBUG] json_repair failed: {e}")
+            # Continue to manual cleanup as last resort
+    else:
+        print("[WARNING] json_repair module not found. Please install: pip install json_repair")
+
+    # Step 4: Fallback to manual cleanup (Legacy Tier 1-3 fixes)
+    # This is a last resort if json_repair is missing or fails
+    try:
+        # Remove JSON comments
+        clean_str = re.sub(r'//.*?\n', '\n', clean_str)
+        clean_str = re.sub(r'/\*[\s\S]*?\*/', '', clean_str)
+
+        # Fix trailing commas (very common LLM error)
+        clean_str = re.sub(r',\s*}', '}', clean_str)
+        clean_str = re.sub(r',\s*]', ']', clean_str)
+
+        # Fix unquoted keys
+        clean_str = re.sub(r'([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)', r'\1"\2"\3', clean_str)
+
+        return json.loads(clean_str)
+    except Exception as final_e:
+        raise ValueError(f"Failed to parse JSON after all attempts. Error: {final_e}\nJSON preview: {clean_str[:200]}...")

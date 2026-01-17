@@ -11,14 +11,16 @@ from utils.data_normalization import normalize_dataframe_columns, read_csv_with_
 # P0 FIX #1: Import schema normalization utilities for crash prevention
 from utils.schema_normalization import normalize_chart
 
-# P0-1 FIX: Import canonical CSV whitelist manager
-from utils.canonical_whitelist import CSVWhitelistManager, CANONICAL_CSV_FILES
+# CRITICAL FIX #5: canonical_whitelist.py is DEPRECATED
+# Now using unified DataManager.CANONICAL_INPUT_FILES (single source of truth)
+# from utils.canonical_whitelist import CSVWhitelistManager, CANONICAL_CSV_FILES
 
 # 问题3修复: Import shared path AutoFix module
 from utils.path_autofix import apply_path_autofix_with_validation
 
-# MINIMAL CHART FIX: Import minimal chart creator (chat with claude2/3.txt integration)
-from agent.create_charts_minimal import MinimalChartCreator
+# MINIMAL CHART FIX: Use ChartCreator for chart generation
+# Note: MinimalChartCreator was removed, using standard ChartCreator instead
+from agent.create_charts import ChartCreator as MinimalChartCreator
 
 
 def computational_solving(llm, coordinator, with_code, problem, task_id, task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt, config, solution, name, output_dir, dataset_dir, logger_manager=None):
@@ -88,28 +90,24 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
 
         scanned_files_info = []
 
-        # P0-1 FIX: Only scan 4 canonical CSV files (unified whitelist)
-        # This prevents LLM from using wrong table variants (cleaned_*.csv, clean_summerOly_*.csv)
-        canonical_files = {
-            'clean_athletes.csv',
-            'clean_hosts.csv',
-            'clean_medal_counts.csv',
-            'clean_programs.csv'
-        }
+        # CRITICAL FIX #5: Removed hardcoded canonical_files
+        # Now using unified DataManager.CANONICAL_INPUT_FILES (single source of truth)
 
-        # Part 1: Scan dataset_dir using DataManager and Schema Registry
+        # CRITICAL FIX #5: Use DataManager's unified whitelist
         if data_mgr and data_mgr.data_dir.exists():
+            # Use DataManager's CANONICAL_INPUT_FILES (single source of truth)
+            canonical_files = data_mgr.CANONICAL_INPUT_FILES
             all_csv_files = data_mgr.list_csv_files()
 
-            # P0-1: Filter to only canonical files
+            # Filter to only canonical files
             csv_files = [f for f in all_csv_files if f in canonical_files]
 
             if logger_manager:
-                main_logger.info(f"[P0-1] Filtered to {len(csv_files)} canonical files (from {len(all_csv_files)} total)")
-                main_logger.debug(f"[P0-1] Canonical files: {sorted(canonical_files)}")
+                main_logger.info(f"[CRITICAL FIX #5] Filtered to {len(csv_files)} canonical files (from {len(all_csv_files)} total)")
+                main_logger.debug(f"[CRITICAL FIX #5] Canonical files: {sorted(canonical_files)}")
                 excluded = [f for f in all_csv_files if f not in canonical_files]
                 if excluded:
-                    main_logger.debug(f"[P0-1] Excluded non-canonical files: {sorted(excluded)}")
+                    main_logger.debug(f"[CRITICAL FIX #5] Excluded non-canonical files: {sorted(excluded)}")
 
             # P1-5: Scan only canonical CSV files and build schema registry
             input_count = 0
@@ -370,18 +368,24 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
 
     # Generate charts with actual images
     if logger_manager:
-        logger_manager.log_progress(f"Task {task_id}: Chart Generation... ({config['chart_num']} charts)")
+        logger_manager.log_progress(f"Task {task_id}: Chart Generation... ({config['num_charts']} charts)")
 
-    # P0-1 FIX: Use canonical CSV whitelist
-    # Only expose canonical input data files to chart generation
-    # This prevents LLM from using cleaned_, clean_summerOly_, etc.
-    canonical_manager = CSVWhitelistManager(dataset_dir)
-    input_data_files = list(canonical_manager.get_canonical_files())
+    # CRITICAL FIX #5: Use unified DataManager for file filtering
+    # Get canonical input files (whitelist managed)
+    input_paths = [str(f) for f in data_mgr.get_canonical_input_files()]
 
-    # Prepend dataset directory to get full paths
-    input_data_files_with_paths = [
-        os.path.join(dataset_dir, f) for f in input_data_files
-    ]
+    # Get task-generated output files (auto-discovered)
+    output_paths = [str(f) for f in data_mgr.get_task_generated_files()]
+
+    # Combine: output files first (priority for chart generation), then input files
+    all_plottable_files = output_paths + input_paths
+
+    if logger_manager:
+        main_logger.info(f"[CRITICAL FIX #5] Chart generation file filtering:")
+        main_logger.info(f"[CRITICAL FIX #5]   - {len(input_paths)} canonical input files")
+        main_logger.info(f"[CRITICAL FIX #5]   - {len(output_paths)} task-generated files")
+        main_logger.info(f"[CRITICAL FIX #5]   - {len(all_plottable_files)} total plottable files")
+
 
     # Collect CSV data files generated by the task (EXCLUDE input data files)
     data_files = []
@@ -410,7 +414,7 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     # In production, these could be generated by LLM, but for now use simple templates
     chart_descriptions = [
         f"Chart {i} for task {task_id} showing data visualization"
-        for i in range(1, config['chart_num'] + 1)
+        for i in range(1, config['num_charts'] + 1)
     ]
 
     # Generate charts using minimal renderer
@@ -418,7 +422,7 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     charts = minimal_cc.create_charts_from_csv_files(
         chart_descriptions=chart_descriptions,
         save_dir=charts_dir,
-        csv_files=data_files if data_files else input_data_files_with_paths
+        csv_files=data_files if data_files else all_plottable_files  # CRITICAL FIX #5: Use unified file list
     )
 
     # MINIMAL CHART FIX: Normalize charts to minimal structure
@@ -433,14 +437,57 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
             description = chart.get('title', chart.get('description', f'Chart {i+1}'))
             logger_manager.log_chart_generation(
                 task_id=task_id,
-                chart_num=i+1,
+                num_charts=i+1,
                 description=description,
                 success=chart.get('success', False),
                 error=chart.get('error')
             )
 
-    # Store charts in task dict
+    # [NEW] Issue 18 FIX: Enhanced chart quality checking with WARNING status
+    # Detect suboptimal charts (too small, potentially empty, or quality issues)
+    processed_charts = []
+    for i, chart in enumerate(charts):
+        chart_info = {
+            "title": chart.get('title', f'Chart {i+1}'),
+            "path": chart.get('image_path', ''),
+            "success": chart.get('success', False)
+        }
+
+        # Quality check: If file is too small, mark as WARNING
+        if chart.get('success') and chart.get('image_path'):
+            image_path = chart['image_path']
+            if os.path.exists(image_path):
+                file_size = os.path.getsize(image_path)
+
+                # Less than 1KB is likely an empty or corrupted chart
+                if file_size < 1024:
+                    chart_info["status"] = "WARNING"
+                    chart_info["issue"] = f"Chart file too small ({file_size} bytes), possibly empty or corrupted"
+
+                    # Log warning for visibility
+                    if logger_manager:
+                        main_logger = logger_manager.get_logger('main')
+                        main_logger.warning(
+                            f"[Issue 18] Task {task_id} Chart {i+1}: {chart_info['issue']}"
+                        )
+                else:
+                    chart_info["status"] = "SUCCESS"
+                    chart_info["file_size"] = file_size
+            else:
+                chart_info["status"] = "FAILED"
+                chart_info["issue"] = "File not found after successful generation"
+        else:
+            # Chart generation failed
+            chart_info["status"] = "FAILED"
+            if chart.get('error'):
+                chart_info["issue"] = chart['error']
+
+        processed_charts.append(chart_info)
+
+    # Store original charts in task dict (for backward compatibility)
     task_dict['charts'] = charts
+    # [NEW] Store enhanced chart details with quality status
+    task_dict['charts_detail'] = processed_charts
     solution['tasks'].append(task_dict)
     save_solution(solution, name, output_dir)
 

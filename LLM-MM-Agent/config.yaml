@@ -2,8 +2,8 @@ top_method_num: 6
 problem_analysis_round: 3
 problem_modeling_round: 3
 task_formulas_round: 5
-tasknum: 5
-chart_num: 5
+num_tasks: 5
+num_charts: 5
 
 # Logging Configuration
 logging:
@@ -16,3 +16,19 @@ logging:
   log_code_execution: true
   log_chart_generation: true
   debug_mode: true
+
+# [NEW] Path Configuration
+# Centralized path management to avoid hardcoding
+# Supports both relative paths (from project root) and absolute paths
+paths:
+  # Data root directory (relative to project root or absolute)
+  # Example: "MMBench" (relative) or "D:/data" or "/mnt/s3/data" (absolute)
+  root_data: "MMBench"
+
+  # Output root directory (relative to project root or absolute)
+  # Example: "MMAgent/output" (relative) or "D:/outputs" (absolute)
+  output_root: "MMAgent/output"
+
+  # Subdirectory names (rarely need to change)
+  problem_dir: "problem"
+  dataset_dir: "dataset"

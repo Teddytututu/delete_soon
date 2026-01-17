@@ -4,19 +4,34 @@ import openai
 from dotenv import load_dotenv
 import json
 import threading
-import random  # P0-1 FIX: For jitter in rate limit backoff
-import time  # P0-2 FIX: For rate limiting
-from collections import deque
+import time
+import logging
+from collections import deque, OrderedDict
 from typing import Optional, Dict, List, Any
+
+# [NEW] Import tenacity for robust retry strategy with exponential backoff
+from tenacity import (
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+    before_sleep_log
+)
+# [NEW] Import OpenAI exception classes for intelligent error classification
+from openai import (
+    APIConnectionError,
+    InternalServerError,
+    RateLimitError,
+    BadRequestError,
+    APIError
+)
 
 load_dotenv()
 
-# P0-2 FIX: Global rate limiting to prevent Error 429
-# Tracks active API calls across all LLM instances
-_global_api_lock = threading.Lock()
-# P0 FIX: Completely serialize ALL API calls globally to prevent 429 errors
+# Global lock to track active API calls across all LLM instances and prevent Error 429
 # Multiple LLM instances across pipeline stages must not call API concurrently
 # Each API call acquires the global lock, holds it during the API call + 1s delay, then releases
+_global_api_lock = threading.Lock()
 
 
 class LLM:
@@ -53,15 +68,16 @@ class LLM:
         self.enable_summary_cache = enable_summary_cache  # Enable summary caching
         self.cache_similarity_threshold = cache_similarity_threshold  # Cache threshold
 
-        # CRITICAL: Initialize instance-level usage tracking with LRU eviction
+        # Initialize instance-level usage tracking with LRU eviction
         self._max_usage_history = max_usage_history
         self._usages = deque(maxlen=max_usage_history)
 
-        # CRITICAL: Initialize threading lock to serialize API calls (prevent Error 429)
+        # Initialize instance-level lock to serialize API calls for this LLM instance
         self.api_lock = threading.Lock()
 
-        # Initialize summary cache
-        self._summary_cache = {}  # {prompt_hash: summary}
+        # Initialize summary cache with LRU eviction
+        self._summary_cache = OrderedDict()  # {prompt_hash: summary} - LRU order
+        self._max_cache_size = 100  # Maximum cache size before eviction
 
         # Set API base URL based on model name
         if self.model_name in ['deepseek-chat', 'deepseek-reasoner']:
@@ -122,9 +138,51 @@ class LLM:
             self.model_name = model_name
         self.client = openai.Client(api_key=self.api_key, base_url=self.api_base)
 
+    def _should_retry_error(self, exception):
+        """
+        Predicate function to determine if we should retry based on the exception type.
+
+        This implements intelligent error classification:
+        - FATAL errors (400): Stop immediately to avoid wasting API quota
+        - RETRYABLE errors (429, 5xx): Wait and retry with exponential backoff
+
+        Args:
+            exception: The exception thrown by the OpenAI API call
+
+        Returns:
+            bool: True if we should retry, False if we should stop
+        """
+        # 1. 致命错误 (FATAL): 400 Bad Request
+        # Context Limit Exceeded or invalid parameters - retrying won't help
+        # 绝对不要重试，否则会浪费 API 额度并持续报错
+        if isinstance(exception, BadRequestError):
+            if self.logger_manager:
+                self.logger_manager.get_logger('llm_api').error(
+                    f"[CRITICAL] Context Limit Exceeded or Bad Request: {exception}. NOT RETRYING."
+                )
+            return False
+
+        # 2. 可重试错误 (RETRYABLE):
+        # - 429 Rate Limit (速率限制)
+        # - 500/502/503 Internal Server Error (服务端崩溃)
+        # - Connection Error (网络波动)
+        if isinstance(exception, (RateLimitError, APIConnectionError, InternalServerError)):
+            return True
+
+        # 3. 其他 API 错误：检查状态码
+        # 有些兼容 API 可能抛出通用的 APIError，需检查 status_code
+        if isinstance(exception, APIError) and hasattr(exception, 'status_code'):
+            if exception.status_code:
+                # Retry on 5xx server errors and 429 rate limit
+                if exception.status_code >= 500 or exception.status_code == 429:
+                    return True
+
+        # 4. 未知错误或其他异常：不重试
+        return False
+
     def generate(self, prompt, system='', usage=True, temperature=None):
         """
-        Generate response from LLM with rate limiting, retry logic, and tracking.
+        Generate response from LLM with rate limiting, tenacity-based retry logic, and tracking.
 
         Args:
             prompt: User prompt
@@ -136,197 +194,187 @@ class LLM:
         Returns:
             Generated response text
 
-        P0 FIX #1: Added exponential backoff retry for RateLimitError 429
+        Issue #13 FIX: Now uses Tenacity library for robust retry with intelligent error classification:
+        - Retries on: 429 (Rate Limit), 5xx (Server Error), Network Errors
+        - Stops immediately on: 400 (Context Limit)
+        - Exponential backoff: 2s, 4s, 8s, 16s, 32s (max 60s)
         """
         # Use default temperature if not specified
         if temperature is None:
             temperature = 0.7
 
-        # P0 FIX: Use global lock to completely serialize API calls
+        # Use global lock to serialize API calls across all LLM instances
         global _global_api_lock
 
-        # ======== P0 FIX: Exponential Backoff Retry for 429 Errors ========
-        max_retries = 3
-        base_delay = 2.0  # Initial delay 2 seconds
+        # Get logger for tenacity retry attempts
+        retry_logger = logging.getLogger("tenacity")
+        if self.logger_manager:
+            retry_logger = self.logger_manager.get_logger('llm_api')
 
-        for attempt in range(max_retries):
-            try:
-                # P0 FIX: Acquire global lock to COMPLETELY serialize all API calls
-                # This prevents ANY concurrent API calls across all LLM instances
-                with _global_api_lock:
-                    # CRITICAL: Add 1-second delay to prevent rate limiting
-                    time.sleep(1)
+        try:
+            # Issue #13 FIX: Use Tenacity for robust retry with exponential backoff
+            # wait_exponential: 2s, 4s, 8s, 16s, 32s (capped at max=60)
+            # stop_after_attempt: Maximum 5 retries
+            # reraise: Raise exception after all retries exhausted
+            for attempt in Retrying(
+                retry=retry_if_exception(self._should_retry_error),
+                wait=wait_exponential(multiplier=1, min=2, max=60),
+                stop=stop_after_attempt(5),
+                reraise=True,
+                before_sleep=before_sleep_log(retry_logger, logging.WARNING)
+            ):
+                with attempt:
+                    # Acquire global lock to serialize all API calls and prevent Error 429
+                    with _global_api_lock:
+                        # Add 1-second delay between API calls to avoid rate limiting
+                        time.sleep(1)
 
-                    # Track LLM call start (if tracker available)
-                    start_time = None
-                    if self.tracker:
-                        start_time = time.time()
+                        # Track LLM call start (if tracker available)
+                        start_time = None
+                        if self.tracker:
+                            start_time = time.time()
 
-                    # API call (now serialized and rate-limited)
-                    if self.model_name in ['deepseek-chat', 'deepseek-reasoner']:
-                        response = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {'role': 'system', 'content': system},
-                                {'role': 'user', 'content': prompt}
-                            ],
-                            temperature=temperature,  # Use parameter instead of hardcoded 0.7
-                            top_p=1.0,
-                            frequency_penalty=0.0,
-                            presence_penalty=0.0
-                        )
-                        answer = response.choices[0].message.content
-                        usage_data = {
-                            'completion_tokens': response.usage.completion_tokens,
-                            'prompt_tokens': response.usage.prompt_tokens,
-                            'total_tokens': response.usage.total_tokens
+                        # API call (now serialized and rate-limited)
+                        if self.model_name in ['deepseek-chat', 'deepseek-reasoner']:
+                            response = self.client.chat.completions.create(
+                                model=self.model_name,
+                                messages=[
+                                    {'role': 'system', 'content': system},
+                                    {'role': 'user', 'content': prompt}
+                                ],
+                                temperature=temperature,
+                                top_p=1.0,
+                                frequency_penalty=0.0,
+                                presence_penalty=0.0
+                            )
+                            answer = response.choices[0].message.content
+                            usage_data = {
+                                'completion_tokens': response.usage.completion_tokens,
+                                'prompt_tokens': response.usage.prompt_tokens,
+                                'total_tokens': response.usage.total_tokens
+                            }
+                        elif self.model_name in ['gpt-4o', 'gpt-4']:
+                            response = self.client.chat.completions.create(
+                                model=self.model_name,
+                                messages=[
+                                    {'role': 'system', 'content': system},
+                                    {'role': 'user', 'content': prompt}
+                                ],
+                                temperature=temperature,
+                                top_p=1.0,
+                                frequency_penalty=0.0,
+                                presence_penalty=0.0
+                            )
+                            answer = response.choices[0].message.content
+                            usage_data = {
+                                'completion_tokens': response.usage.completion_tokens,
+                                'prompt_tokens': response.usage.prompt_tokens,
+                                'total_tokens': response.usage.total_tokens
+                            }
+                        elif self.model_name in ['glm-4-plus', 'glm-4-0520', 'glm-4-air', 'glm-4-flash', 'glm-4.7']:
+                            response = self.client.chat.completions.create(
+                                model=self.model_name,
+                                messages=[
+                                    {'role': 'system', 'content': system},
+                                    {'role': 'user', 'content': prompt}
+                                ],
+                                temperature=temperature,
+                                top_p=1.0,
+                                frequency_penalty=0.0,
+                                presence_penalty=0.0
+                            )
+                            answer = response.choices[0].message.content
+                            usage_data = {
+                                'completion_tokens': response.usage.completion_tokens,
+                                'prompt_tokens': response.usage.prompt_tokens,
+                                'total_tokens': response.usage.total_tokens
+                            }
+                        elif self.model_name in ['qwen2.5-72b-instruct']:
+                            response = self.client.chat.completions.create(
+                                model=self.model_name,
+                                messages=[
+                                    {'role': 'system', 'content': system},
+                                    {'role': 'user', 'content': prompt}
+                                ],
+                                temperature=temperature,
+                                top_p=1.0,
+                                frequency_penalty=0.0,
+                                presence_penalty=0.0
+                            )
+                            answer = response.choices[0].message.content
+                            usage_data = {
+                                'completion_tokens': response.usage.completion_tokens,
+                                'prompt_tokens': response.usage.prompt_tokens,
+                                'total_tokens': response.usage.total_tokens
+                            }
+                        else:
+                            # Default fallback
+                            response = self.client.chat.completions.create(
+                                model=self.model_name,
+                                messages=[
+                                    {'role': 'system', 'content': system},
+                                    {'role': 'user', 'content': prompt}
+                                ],
+                                temperature=0.7
+                            )
+                            answer = response.choices[0].message.content
+                            usage_data = {
+                                'completion_tokens': response.usage.completion_tokens,
+                                'prompt_tokens': response.usage.prompt_tokens,
+                                'total_tokens': response.usage.total_tokens
+                            }
+
+                        # Track usage (if enabled)
+                        usage_data_with_meta = {
+                            **usage_data,
+                            'model': self.model_name,
+                            'timestamp': time.time()
                         }
-                    elif self.model_name in ['gpt-4o', 'gpt-4']:
-                        response = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {'role': 'system', 'content': system},
-                                {'role': 'user', 'content': prompt}
-                            ],
-                            temperature=temperature,  # Use parameter instead of hardcoded 0.7
-                            top_p=1.0,
-                            frequency_penalty=0.0,
-                            presence_penalty=0.0
-                        )
-                        answer = response.choices[0].message.content
-                        usage_data = {
-                            'completion_tokens': response.usage.completion_tokens,
-                            'prompt_tokens': response.usage.prompt_tokens,
-                            'total_tokens': response.usage.total_tokens
-                        }
-                    elif self.model_name in ['glm-4-plus', 'glm-4-0520', 'glm-4-air', 'glm-4-flash', 'glm-4.7']:
-                        # NEW: GLM-4.7 support
-                        response = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {'role': 'system', 'content': system},
-                                {'role': 'user', 'content': prompt}
-                            ],
-                            temperature=temperature,  # Use parameter instead of hardcoded 0.7
-                            top_p=1.0,
-                            frequency_penalty=0.0,
-                            presence_penalty=0.0
-                        )
-                        answer = response.choices[0].message.content
-                        usage_data = {
-                            'completion_tokens': response.usage.completion_tokens,
-                            'prompt_tokens': response.usage.prompt_tokens,
-                            'total_tokens': response.usage.total_tokens
-                        }
-                    elif self.model_name in ['qwen2.5-72b-instruct']:
-                        response = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {'role': 'system', 'content': system},
-                                {'role': 'user', 'content': prompt}
-                            ],
-                            temperature=temperature,  # Use parameter instead of hardcoded 0.7
-                            top_p=1.0,
-                            frequency_penalty=0.0,
-                            presence_penalty=0.0
-                        )
-                        answer = response.choices[0].message.content
-                        usage_data = {
-                            'completion_tokens': response.usage.completion_tokens,
-                            'prompt_tokens': response.usage.prompt_tokens,
-                            'total_tokens': response.usage.total_tokens
-                        }
-                    else:
-                        # Default fallback
-                        response = self.client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {'role': 'system', 'content': system},
-                                {'role': 'user', 'content': prompt}
-                            ],
-                            temperature=0.7
-                        )
-                        answer = response.choices[0].message.content
-                        usage_data = {
-                            'completion_tokens': response.usage.completion_tokens,
-                            'prompt_tokens': response.usage.prompt_tokens,
-                            'total_tokens': response.usage.total_tokens
-                        }
+                        if usage:
+                            self._usages.append(usage_data_with_meta)
 
-                    # Track usage (if enabled)
-                    usage_data_with_meta = {
-                        **usage_data,
-                        'model': self.model_name,
-                        'timestamp': time.time()
-                    }
-                    if usage:
-                        self._usages.append(usage_data_with_meta)
+                        # Generate latent summary if enabled (before tracking)
+                        latent_summary = None
+                        if self.enable_latent_summary:
+                            latent_summary = self._generate_latent_summary(prompt, answer, usage_data)
 
-                    # Generate latent summary if enabled (before tracking)
-                    latent_summary = None
-                    if self.enable_latent_summary:
-                        latent_summary = self._generate_latent_summary(prompt, answer, usage_data)
+                        # Track LLM call completion (if tracker available)
+                        if self.tracker and start_time:
+                            latency = time.time() - start_time
+                            self.tracker.track_llm_call(
+                                prompt=prompt,
+                                response=answer,
+                                model=self.model_name,
+                                usage=usage_data_with_meta,
+                                stage=getattr(self, '_current_stage', 'unknown'),
+                                latency=latency,
+                                latent_summary=latent_summary
+                            )
 
-                    # Track LLM call completion (if tracker available)
-                    if self.tracker and start_time:
-                        latency = time.time() - start_time
-                        self.tracker.track_llm_call(
-                            prompt=prompt,
-                            response=answer,
-                            model=self.model_name,
-                            usage=usage_data_with_meta,
-                            stage=getattr(self, '_current_stage', 'unknown'),
-                            latency=latency,
-                            latent_summary=latent_summary  # NEW: Pass latent summary to tracker
-                        )
-
-                    # Log LLM call (if logger available)
-                    if self.logger_manager:
-                        self.logger_manager.get_logger('llm_api').info(
-                            f"LLM call: model={self.model_name}, "
-                            f"prompt_tokens={usage_data['prompt_tokens']}, "
-                            f"completion_tokens={usage_data['completion_tokens']}"
-                        )
-
-                    elif self.logger:
-                        self.logger.info(f"[LLM] UserID: {self.user_id}, Model: {self.model_name}, Usage: {usage_data}")
-
-                    return answer  # Success - return immediately
-
-            except Exception as e:
-                error_str = str(e)
-                error_code = getattr(e, 'code', None)
-
-                # P0 FIX #1: Check if this is a 429 rate limit error
-                is_rate_limit = ('429' in error_str or '1302' in error_str or
-                                error_code in [429, 1302] or
-                                'rate_limit' in error_str.lower() or
-                                'RateLimitError' in type(e).__name__)
-
-                if is_rate_limit:
-                    if attempt < max_retries - 1:
-                        # Exponential backoff: 2s, 4s, 8s + random jitter
-                        delay = base_delay * (2 ** attempt)
-                        jitter = random.random()  # P0-1 FIX: Was time.random(), now random.random()
-                        total_delay = delay + jitter
-
+                        # Log LLM call success (if logger available)
                         if self.logger_manager:
-                            self.logger_manager.get_logger('llm_api').warning(
-                                f"[P0 FIX #1] Rate limit hit (429/1302). "
-                                f"Retrying in {total_delay:.1f}s (attempt {attempt+1}/{max_retries})"
+                            self.logger_manager.get_logger('llm_api').info(
+                                f"LLM call success: model={self.model_name}, "
+                                f"prompt_tokens={usage_data['prompt_tokens']}, "
+                                f"completion_tokens={usage_data['completion_tokens']}"
                             )
                         elif self.logger:
-                            self.logger.warning(
-                                f"[P0 FIX #1] Rate limit hit. Retrying in {total_delay:.1f}s "
-                                f"(attempt {attempt+1}/{max_retries})"
-                            )
+                            self.logger.info(f"[LLM] UserID: {self.user_id}, Model: {self.model_name}, Usage: {usage_data}")
 
-                        time.sleep(total_delay)
-                        continue  # Retry the API call
+                        return answer  # Success - return immediately
 
-                # If not a rate limit error, or retry attempts exhausted, re-raise the exception
-                raise
-        # ==========================================
+        except BadRequestError as e:
+            # Issue #13 FIX: Specifically catch 400 Bad Request errors (Context Limit, etc.)
+            # These should NOT be retried as retrying won't help
+            if self.logger_manager:
+                self.logger_manager.log_exception(e, context="API Request Failed (Fatal)", stage="LLM")
+            raise ValueError(f"Fatal LLM Error (Context Limit or Bad Request): {e}") from e
+
+        except Exception as e:
+            # Other exceptions after retry exhaustion
+            if self.logger_manager:
+                self.logger_manager.get_logger('llm_api').error(f"LLM generation failed after all retries: {e}")
+            raise
 
     def get_total_usage(self):
         """
@@ -391,9 +439,11 @@ class LLM:
                 # Check cache
                 if prompt_hash in self._summary_cache:
                     cached_summary = self._summary_cache[prompt_hash]
+                    # LRU: Move to end (most recently used)
+                    self._summary_cache.move_to_end(prompt_hash)
                     if self.logger_manager:
                         self.logger_manager.get_logger('llm_api').debug(
-                            f"Using cached summary: {cached_summary}"
+                            f"LRU Cache Hit: {cached_summary}"
                         )
                     return cached_summary
 
@@ -424,8 +474,7 @@ Focus on: What was the main purpose and outcome?"""
 
             summary = summary_response.choices[0].message.content.strip()
 
-            # CRITICAL FIX: Enforce length limit and format
-            # Replace newlines with spaces to keep brief_summary as single line
+            # Enforce length limit and format: replace newlines with spaces for single-line output
             summary = summary.replace('\n', ' ').replace('\r', ' ')
             # Remove multiple spaces
             import re
@@ -438,12 +487,22 @@ Focus on: What was the main purpose and outcome?"""
             # FEATURE 2: Save to cache
             if self.enable_summary_cache:
                 prompt_hash = hashlib.md5(prompt[:300].encode()).hexdigest()
+
+                # If key already exists, delete it first (to update position)
+                if prompt_hash in self._summary_cache:
+                    del self._summary_cache[prompt_hash]
+
                 self._summary_cache[prompt_hash] = summary
-                # Limit cache size to prevent memory issues
-                if len(self._summary_cache) > 100:
-                    # Remove oldest entry (FIFO)
-                    oldest_key = next(iter(self._summary_cache))
-                    del self._summary_cache[oldest_key]
+                # New entry is automatically at the end (most recently used)
+
+                # LRU Eviction: Remove oldest entry if cache is full
+                if len(self._summary_cache) > self._max_cache_size:
+                    # popitem(last=False) removes the first (oldest) item
+                    oldest_key, _ = self._summary_cache.popitem(last=False)
+                    if self.logger_manager:
+                        self.logger_manager.get_logger('llm_api').debug(
+                            f"LRU Eviction: Removed oldest entry {oldest_key}"
+                        )
 
             # Save to latent_summaries.jsonl in debug directory
             if self.logger_manager:

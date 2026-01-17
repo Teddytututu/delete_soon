@@ -2,30 +2,49 @@ import sys
 from pathlib import Path
 import json
 import os
+import pickle
 
-# CRITICAL: Configure UTF-8 encoding for Windows terminal
-# This prevents UnicodeEncodeError when printing special characters
-if sys.platform == 'win32':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        # Fallback for older Python versions
-        import io
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# [FIX 11.1] Use relative imports (standard Python practice)
+# Fallback to absolute imports for backward compatibility
+try:
+    from .agent.coordinator import Coordinator
+    from .utils.utils import load_config, PlatformUtils
+    from .llm.llm import LLM
+except ImportError:
+    # Fallback: if running as script without proper package setup
+    from agent.coordinator import Coordinator
+    from utils.utils import load_config, PlatformUtils
+    from llm.llm import LLM
 
-# Add parent directory to path for absolute imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# [FIX 14.1] Configure console encoding for all platforms using PlatformUtils
+# This prevents UnicodeEncodeError on Windows when printing special characters
+PlatformUtils.set_console_encoding()
 
-from llm.llm import LLM
-from utils.utils import write_json_file, get_info
-from utils.execution_tracker import get_tracker
-from utils.auto_evaluation import run_auto_evaluation
+# [DELETE] [FIX 11.2] Removed sys.path modification - this is now handled by run.py
+# Old code: sys.path.insert(0, str(Path(__file__).parent.parent))
+# Reason: Environment configuration should be done in bootstrap script, not in business logic
+
+# [FIX 11.3] Use relative imports for remaining modules
+try:
+    from .utils.utils import write_json_file, get_info
+    from .utils.execution_tracker import get_tracker
+    from .utils.auto_evaluation import run_auto_evaluation
+    from .utils.problem_analysis import problem_analysis
+    from .utils.mathematical_modeling import mathematical_modeling
+    from .utils.computational_solving import computational_solving
+    from .utils.solution_reporting import generate_paper
+except ImportError:
+    # Fallback: if running as script without proper package setup
+    from utils.utils import write_json_file, get_info
+    from utils.execution_tracker import get_tracker
+    from utils.auto_evaluation import run_auto_evaluation
+    from utils.problem_analysis import problem_analysis
+    from utils.mathematical_modeling import mathematical_modeling
+    from utils.computational_solving import computational_solving
+    from utils.solution_reporting import generate_paper
+
 import time
 import argparse
-from utils.problem_analysis import problem_analysis
-from utils.mathematical_modeling import mathematical_modeling
-from utils.computational_solving import computational_solving
-from utils.solution_reporting import generate_paper
 from functools import partial
 
 
@@ -176,7 +195,7 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         enable_latent_summary=False, enable_latent_summary_stages=None,
         enable_summary_cache=True, failure_handler=None):
     """
-    Run MM-Agent experiment with comprehensive execution tracking.
+    Run MM-Agent experiment with AUTO-RESUME (Checkpointing) capability.
 
     Args:
         key: API key for LLM
@@ -216,30 +235,118 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
             main_logger.info("[INFO] Summary caching DISABLED")
             main_logger.info("[WARNING] Without caching, API costs will be higher")
 
+    # ==============================================================================
+    # [NEW] Checkpoint Path Definition
+    # ==============================================================================
+    checkpoint_dir = os.path.join(output_dir, 'checkpoints')
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(checkpoint_dir, 'pipeline_state.pkl')
+
+    # Variables to be initialized (either from scratch or checkpoint)
+    problem = None
+    order = None
+    with_code = False
+    coordinator = None
+    task_descriptions = None
+    solution = None
+    completed_tasks = set()  # Track finished task IDs
+
+    # ==============================================================================
+    # [NEW] Auto-Resume Logic
+    # ==============================================================================
+    resume_success = False
+    if os.path.exists(checkpoint_path):
+        main_logger.info(f"[RESUME] Found checkpoint: {checkpoint_path}")
+        try:
+            with open(checkpoint_path, 'rb') as f:
+                state = pickle.load(f)
+
+            # Restore Data
+            problem = state['problem']
+            order = state['order']
+            with_code = state['with_code']
+            task_descriptions = state['task_descriptions']
+            solution = state['solution']
+            completed_tasks = state['completed_tasks']
+
+            # Restore Coordinator (Re-instantiate + Hydrate Data)
+            # We cannot pickle the LLM object, so we create a new Coordinator and inject saved memory
+            main_logger = logger_manager.get_logger('main')
+            coordinator = Coordinator(llm, logger=main_logger)
+            coordinator.memory = state['coord_state']['memory']
+            coordinator.code_memory = state['coord_state']['code_memory']
+            coordinator.DAG = state['coord_state']['DAG']
+            # Safely restore analysis if it exists
+            if 'task_dependency_analysis' in state['coord_state']:
+                coordinator.task_dependency_analysis = state['coord_state']['task_dependency_analysis']
+
+            main_logger.info(f"[RESUME] Successfully restored state. Completed tasks: {sorted(list(completed_tasks))}")
+            resume_success = True
+        except Exception as e:
+            main_logger.warning(f"[RESUME] Failed to load checkpoint (will start from scratch): {e}")
+            resume_success = False
+
+    # Helper function to save state
+    def _save_checkpoint(current_stage):
+        """Save current pipeline state to checkpoint file."""
+        try:
+            # Extract pure data from coordinator (exclude LLM instance)
+            coord_state = {
+                'memory': coordinator.memory,
+                'code_memory': coordinator.code_memory,
+                'DAG': getattr(coordinator, 'DAG', {}),
+                'task_dependency_analysis': getattr(coordinator, 'task_dependency_analysis', [])
+            }
+
+            state = {
+                'problem': problem,
+                'order': order,
+                'with_code': with_code,
+                'task_descriptions': task_descriptions,
+                'solution': solution,
+                'completed_tasks': completed_tasks,
+                'coord_state': coord_state,
+                'timestamp': time.time()
+            }
+            with open(checkpoint_path, 'wb') as f:
+                pickle.dump(state, f)
+            main_logger.info(f"[CHECKPOINT] State saved at stage: {current_stage}")
+        except Exception as e:
+            main_logger.error(f"[CHECKPOINT] Failed to save state: {e}")
+
     pipeline_success = False
     total_start_time = time.time()
 
     try:
         # ==================== STAGE 1: Problem Analysis ====================
-        tracker.start_stage("Problem Analysis", stage_num=1)
-        logger_manager.log_stage_start("Problem Analysis", stage_num=1)
-        start_stage1 = time.time()
+        if not resume_success:
+            # RUN FROM SCRATCH
+            tracker.start_stage("Problem Analysis", stage_num=1)
+            logger_manager.log_stage_start("Problem Analysis", stage_num=1)
+            start_stage1 = time.time()
 
-        try:
-            problem, order, with_code, coordinator, task_descriptions, solution = \
-                problem_analysis(llm, problem_path, config, dataset_path, output_dir, logger_manager)
+            try:
+                problem, order, with_code, coordinator, task_descriptions, solution = \
+                    problem_analysis(llm, problem_path, config, dataset_path, output_dir, logger_manager)
 
-            duration_stage1 = int(time.time() - start_stage1)
-            tracker.end_stage("Problem Analysis", duration_stage1)
-            logger_manager.log_stage_complete("Problem Analysis", duration_stage1, stage_num=1)
+                duration_stage1 = int(time.time() - start_stage1)
+                tracker.end_stage("Problem Analysis", duration_stage1)
+                logger_manager.log_stage_complete("Problem Analysis", duration_stage1, stage_num=1)
 
-            # STEP 4: Record stage completion for failure handling
-            if failure_handler:
-                failure_handler.record_stage_completion("Problem Analysis")
-        except Exception as e:
-            tracker.track_error("stage_error", str(e), "Problem Analysis")
-            logger_manager.log_exception(e, "Problem Analysis failed", stage="Problem Analysis")
-            raise
+                # STEP 4: Record stage completion for failure handling
+                if failure_handler:
+                    failure_handler.record_stage_completion("Problem Analysis")
+
+                # [NEW] Save Checkpoint after Stage 1
+                _save_checkpoint("Stage 1 Complete")
+
+            except Exception as e:
+                tracker.track_error("stage_error", str(e), "Problem Analysis")
+                logger_manager.log_exception(e, "Problem Analysis failed", stage="Problem Analysis")
+                raise
+        else:
+            # SKIPPING STAGE 1
+            main_logger.info("[RESUME] Skipping Stage 1 (Problem Analysis) - Data loaded from checkpoint")
 
         # ==================== STAGE 2 & 3: Mathematical Modeling & Computational Solving ====================
         tracker.start_stage("Mathematical Modeling & Computational Solving", stage_num=2)
@@ -247,27 +354,36 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         start_stage23 = time.time()
 
         try:
-            for id in order:
+            for task_id in order:
+                # [NEW] Check if task is already done
+                if task_id in completed_tasks:
+                    main_logger.info(f"[RESUME] Skipping Task {task_id} (Already completed)")
+                    continue
+
                 task_start_time = time.time()
 
                 # Track task start
-                tracker.start_task(id)
-                logger_manager.log_progress(f"Task {id}: Starting Mathematical Modeling", level='info')
+                tracker.start_task(task_id)
+                logger_manager.log_progress(f"Task {task_id}: Starting Mathematical Modeling", level='info')
 
                 # Mathematical Modeling
                 task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt = \
-                    mathematical_modeling(id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager)
+                    mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager)
 
                 # Computational Solving
                 solution = computational_solving(
-                    llm, coordinator, with_code, problem, id, task_description,
+                    llm, coordinator, with_code, problem, task_id, task_description,
                     task_analysis, task_modeling_formulas, task_modeling_method,
                     dependent_file_prompt, config, solution, name, output_dir, dataset_dir, logger_manager
                 )
 
                 task_duration = int(time.time() - task_start_time)
-                tracker.end_task(id, result_summary={"duration": task_duration})
-                logger_manager.log_progress(f"Task {id} Complete ({task_duration}s)", level='info')
+                tracker.end_task(task_id, result_summary={"duration": task_duration})
+                logger_manager.log_progress(f"Task {task_id} Complete ({task_duration}s)", level='info')
+
+                # [NEW] Update Checkpoint after each task
+                completed_tasks.add(task_id)
+                _save_checkpoint(f"Task {task_id} Complete")
 
             duration_stage23 = int(time.time() - start_stage23)
             tracker.end_stage("Mathematical Modeling & Computational Solving", duration_stage23)
@@ -420,12 +536,55 @@ def check_existing_runs(task_id: str, max_runs: int = 3, method_name: str = 'MM-
     return True
 
 
+def resolve_paths_from_config(task_id: str):
+    """
+    [NEW] Helper to resolve paths dynamically from config.
+    Used by preflight_checks to avoid hardcoded paths.
+
+    Args:
+        task_id: The task/problem ID (e.g., "2024_C")
+
+    Returns:
+        Tuple of (problem_path, dataset_base_dir, config_path) as Path objects
+
+    Raises:
+        FileNotFoundError: If config file not found
+    """
+    # Calculate project root: MMAgent/main.py -> MMAgent -> LLM-MM-Agent
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parents[1]
+
+    config_path = project_root / 'config.yaml'
+
+    # Mock args object for load_config
+    class MockArgs:
+        model_name = 'check'
+        method_name = 'check'
+
+    config = load_config(MockArgs(), config_path=str(config_path))
+    paths_cfg = config.get('paths', {})
+
+    # Resolve paths based on config
+    data_root_name = paths_cfg.get('root_data', 'MMBench')
+    data_root = project_root / data_root_name
+
+    problem_dir_name = paths_cfg.get('problem_dir', 'problem')
+    problem_path = data_root / problem_dir_name / f"{task_id}.json"
+
+    dataset_dir_name = paths_cfg.get('dataset_dir', 'dataset')
+    dataset_base_dir = data_root / dataset_dir_name / task_id
+
+    return problem_path, dataset_base_dir, config_path
+
+
 def preflight_checks(task_id: str):
     """
     Perform pre-flight checks to ensure all required files exist.
 
     P1 FIX: Validates input files before starting pipeline to prevent
     mid-execution failures that waste API calls.
+
+    [NEW] Uses config-driven path resolution to eliminate hardcoded paths.
 
     Args:
         task_id: The task/problem ID (e.g., "2024_C")
@@ -437,11 +596,19 @@ def preflight_checks(task_id: str):
     from pathlib import Path
 
     print("\n" + "=" * 80)
-    print("PREFLIGHT CHECKS")
+    print("PREFLIGHT CHECKS (Config-Driven)")
     print("=" * 80)
 
+    # [NEW] Resolve paths dynamically from config
+    try:
+        problem_path, dataset_base_dir, config_path = resolve_paths_from_config(task_id)
+        print(f"[INFO] Config file: {config_path}")
+        print(f"[INFO] Using config-driven path resolution")
+    except Exception as e:
+        print(f"[ERROR] Failed to load config/resolve paths: {e}")
+        raise
+
     # Check 1: Problem file exists
-    problem_path = Path(f'MMBench/problem/{task_id}.json')
     print(f"\n[CHECK 1] Problem file: {problem_path}")
 
     if not problem_path.exists():
@@ -472,11 +639,12 @@ def preflight_checks(task_id: str):
 
             print(f"\n[CHECK 3] Validating dataset files...")
             for ds_path in dataset_paths:
-                # Dataset path can be absolute or relative to MMBench/dataset/
+                # [NEW] Support both absolute and relative paths
+                # If relative, resolve against dataset_base_dir
                 if Path(ds_path).is_absolute():
                     full_path = Path(ds_path)
                 else:
-                    full_path = Path('MMBench/dataset') / task_id / ds_path
+                    full_path = dataset_base_dir / ds_path
 
                 print(f"  Checking: {full_path}")
 
@@ -499,12 +667,8 @@ def preflight_checks(task_id: str):
         else:
             print(f"\n[CHECK 3] No dataset files specified (skipping)")
 
-        # Check 4: Config file
-        print(f"\n[CHECK 4] Configuration file: config.yaml")
-        config_path = Path('config.yaml')
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: config.yaml")
-
+        # Check 4: Config file (already loaded above)
+        print(f"\n[CHECK 4] Configuration file: {config_path}")
         print(f"[OK] Config file exists")
 
     except __import__('json').JSONDecodeError as e:
@@ -516,15 +680,35 @@ def preflight_checks(task_id: str):
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser()
+    """
+    [MODIFIED] Parse and validate command-line arguments.
+
+    Added validation for required parameters and model choices to prevent
+    runtime errors from typos or missing inputs.
+    """
+    parser = argparse.ArgumentParser(
+        description="MM-Agent Experiment Runner - Mathematical Modeling Agent System"
+    )
+
+    # [MODIFIED] Make task a required parameter
+    parser.add_argument('--task', type=str, required=True,
+                        help='Task/problem ID (e.g., "2024_C", "2025_C"). MANDATORY.')
+
+    # [MODIFIED] Add choices validation for model_name to prevent typos
     parser.add_argument('--model_name', type=str, default='gpt-4o',
+                        choices=['gpt-4o', 'gpt-4',
+                                 'deepseek-chat', 'deepseek-reasoner',
+                                 'glm-4-plus', 'glm-4-0520', 'glm-4-air', 'glm-4-flash', 'glm-4.7',
+                                 'qwen2.5-72b-instruct'],
                         help='Model name to use (default: gpt-4o)')
+
     parser.add_argument('--method_name', type=str, default='MM-Agent',
                         help='Method name for output directory (default: MM-Agent)')
-    parser.add_argument('--task', type=str, default='2024_C',
-                        help='Task/problem ID (default: 2024_C)')
+
+    # [MODIFIED] Add API key parameter with validation later
     parser.add_argument('--key', type=str, default='',
-                        help='API key for LLM')
+                        help='API key for LLM. If empty, will look for environment variables.')
+
     parser.add_argument('--enable_latent_summary', action='store_true',
                         help='Enable LLM-based summaries for each API call (increases cost)')
     parser.add_argument('--latent_summary_stages', type=str, nargs='*', default=None,
@@ -533,10 +717,44 @@ def parse_arguments():
     parser.add_argument('--disable_summary_cache', action='store_true',
                         help='Disable summary caching (default: enabled). Caching reduces cost by reusing summaries for similar prompts.')
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # [NEW] Validate API key availability
+    # Check if API key is provided via --key or environment variables
+    if not args.key:
+        # Check environment variables for different providers
+        has_openai_key = bool(os.getenv('OPENAI_API_KEY'))
+        has_zhipu_key = bool(os.getenv('ZHIPU_AI_KEY'))
+        has_deepseek_key = bool(os.getenv('DEEPSEEK_API_KEY'))
+        has_dashscope_key = bool(os.getenv('DASHSCOPE_API_KEY'))
+
+        if not any([has_openai_key, has_zhipu_key, has_deepseek_key, has_dashscope_key]):
+            print("[ERROR] No API key provided!")
+            print("")
+            print("Please provide API key via one of the following methods:")
+            print("  1. Command-line argument: --key 'your-api-key'")
+            print("  2. Environment variable: OPENAI_API_KEY (for OpenAI models)")
+            print("  3. Environment variable: ZHIPU_AI_KEY (for GLM models)")
+            print("  4. Environment variable: DEEPSEEK_API_KEY (for DeepSeek models)")
+            print("  5. Environment variable: DASHSCOPE_API_KEY (for Qwen models)")
+            print("")
+            print("Example usage:")
+            print("  python MMAgent/main.py --task 2024_C --model_name gpt-4o --key 'sk-...'")
+            print("")
+            import sys
+            sys.exit(1)
+
+    return args
 
 
-if __name__ == "__main__":
+# [FIX 11.4] Encapsulated main execution logic in main() function
+def main():
+    """Main entry point for MM-Agent pipeline.
+
+    [FIX 11.4] This function encapsulates the main execution logic.
+    This allows the module to be imported and called programmatically.
+    Environment configuration (sys.path) is now handled by run.py bootstrap script.
+    """
     args = parse_arguments()
 
     # P1 FIX: Run pre-flight checks before starting pipeline
@@ -558,7 +776,10 @@ if __name__ == "__main__":
 
     # STEP 0 FIX: Initialize DataManager to lock CSV paths
     # This prevents LLM from generating code with full Windows paths like C:\Users\...
-    from utils.data_manager import init_data_manager
+    try:
+        from .utils.data_manager import init_data_manager
+    except ImportError:
+        from utils.data_manager import init_data_manager
     data_manager = init_data_manager(dataset_dir)
 
     # Pre-flight check: Validate data files exist before starting
@@ -607,7 +828,10 @@ if __name__ == "__main__":
     solution = None
 
     # STEP 4: Initialize FailureHandler for minimal JSON fallback
-    from utils.failure_handler import FailureHandler
+    try:
+        from .utils.failure_handler import FailureHandler
+    except ImportError:
+        from utils.failure_handler import FailureHandler
     failure_handler = FailureHandler(output_dir, args.task)
 
     try:
@@ -627,8 +851,9 @@ if __name__ == "__main__":
     except Exception as pipeline_error:
         # STEP 4: Pipeline crashed - write minimal solution.json
         error_msg = f"{type(pipeline_error).__name__}: {str(pipeline_error)}"
-        print(f"\n[CRITICAL] Pipeline crashed: {error_msg}")
-        print("[STEP 4 FIX] Writing minimal solution.json to prevent cascading failures...")
+        main_logger = logger_manager.get_logger('main')
+        main_logger.error(f"\n[CRITICAL] Pipeline crashed: {error_msg}")
+        main_logger.info("[STEP 4 FIX] Writing minimal solution.json to prevent cascading failures...")
 
         import traceback
         traceback_details = traceback.format_exc()
@@ -642,8 +867,8 @@ if __name__ == "__main__":
             }
         )
 
-        print(f"[OK] Minimal solution written: {failure_handler.solution_path}")
-        print("[INFO] Downstream stages can now read partial results")
+        main_logger.info(f"Minimal solution written: {failure_handler.solution_path}")
+        main_logger.info("Downstream stages can now read partial results")
 
         # Re-raise exception after writing minimal solution
         raise
@@ -661,8 +886,14 @@ if __name__ == "__main__":
                 f.write("{:.2f}s".format(end - start))
 
             if solution is None:
-                print(f"\n[WARNING] Pipeline crashed, but runtime saved: {end - start:.2f}s")
-                print("[INFO] Check logs in output directory for error details")
-                print("[INFO] Minimal solution.json has been written to prevent cascading failures")
+                main_logger = logger_manager.get_logger('main')
+                main_logger.warning(f"Pipeline crashed, but runtime saved: {end - start:.2f}s")
+                main_logger.info("Check logs in output directory for error details")
+                main_logger.info("Minimal solution.json has been written to prevent cascading failures")
         except Exception as e:
-            print(f"\n[ERROR] Failed to save runtime.txt: {e}")
+            print(f"\n[ERROR] Failed to save runtime.txt: {e}")  # Keep as print since logger might not be initialized
+
+
+# [FIX 11.5] Standard entry point - allows both script execution and module import
+if __name__ == "__main__":
+    main()

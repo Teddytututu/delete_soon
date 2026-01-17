@@ -80,23 +80,27 @@ def problem_analysis(llm, problem_path, config, dataset_path, output_dir, logger
         modeling_solution = pu.modeling(problem_str, problem_analysis, round=config['problem_modeling_round'])
         if logger_manager:
             logger_manager.log_progress("Mathematical Modeling completed", level='info')
-        print('********************* Step 1: Problem Understanding finish *********************')
+            main_logger = logger_manager.get_logger('main')
+            main_logger.info('********************* Step 1: Problem Understanding finish *********************')
 
         # Problem Decomposition
         if logger_manager:
             logger_manager.log_progress("Starting Problem Decomposition (LLM decomposition)", level='info')
         pd = ProblemDecompose(llm)
-        task_descriptions = pd.decompose_and_refine(problem_str, problem_analysis, modeling_solution, problem_type, config['tasknum'])
+        task_descriptions = pd.decompose_and_refine(problem_str, problem_analysis, modeling_solution, problem_type, config['num_tasks'])
         if logger_manager:
             logger_manager.log_progress(f"Problem Decomposition completed - {len(task_descriptions)} tasks identified", level='info')
-        print('********************* Step 2: Problem Decomposition finish *********************')
+            main_logger = logger_manager.get_logger('main')
+            main_logger.info('********************* Step 2: Problem Decomposition finish *********************')
 
         # Task Dependency Analysis
         with_code = len(problem['dataset_path']) > 0
         if logger_manager:
             logger_manager.log_progress("Starting Task Dependency Analysis", level='info')
-        coordinator = Coordinator(llm)
-        order = coordinator.analyze_dependencies(problem_str, problem_analysis, modeling_solution, task_descriptions, config['tasknum'], with_code)
+        # [NEW] Get logger and pass to Coordinator for structured logging
+        main_logger = logger_manager.get_logger('main') if logger_manager else None
+        coordinator = Coordinator(llm, logger=main_logger)
+        order = coordinator.analyze_dependencies(problem_str, problem_analysis, modeling_solution, task_descriptions, config['num_tasks'], with_code)
         if logger_manager:
             logger_manager.log_progress(f"Task Dependency Analysis completed - execution order: {order}", level='info')
 
