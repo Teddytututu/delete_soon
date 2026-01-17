@@ -568,7 +568,7 @@ class ExecutionTracker:
             "execution_time_seconds": execution_time
         })
 
-    def track_chart_generation(self, task_id: str, chart_num: int,
+    def track_chart_generation(self, task_id: str, num_charts: int,
                               description: str, success: bool,
                               output_path: Optional[str] = None,
                               error: Optional[str] = None):
@@ -577,15 +577,15 @@ class ExecutionTracker:
 
         Args:
             task_id: Task identifier
-            chart_num: Chart number
+            num_charts: Chart number
             description: Chart description
             success: Whether generation succeeded
             output_path: Path to generated chart
             error: Error message if failed
         """
-        self.track_event("chart_generation", f"task_{task_id}_chart_{chart_num}", {
+        self.track_event("chart_generation", f"task_{task_id}_chart_{num_charts}", {
             "task_id": str(task_id),
-            "chart_num": chart_num,
+            "num_charts": num_charts,
             "description": description[:200],
             "success": success,
             "output_path": output_path,

@@ -339,14 +339,14 @@ class MMExperimentLogger:
             self.loggers['main'].error(f"Code execution failed: {script_name}")
             self.loggers['errors'].error(log_msg)
 
-    def log_chart_generation(self, task_id: int, chart_num: int,
+    def log_chart_generation(self, task_id: int, num_charts: int,
                            description: str, success: bool, error: str = None):
         """
         Log chart generation details.
 
         Args:
             task_id: Task identifier
-            chart_num: Chart number
+            num_charts: Chart number
             description: Chart description
             success: Whether generation succeeded
             error: Error message if failed
@@ -354,7 +354,7 @@ class MMExperimentLogger:
         log_msg = {
             'timestamp': datetime.now().isoformat(),
             'task_id': task_id,
-            'chart_num': chart_num,
+            'num_charts': num_charts,
             'description': description[:100] + '...' if len(description) > 100 else description,
             'success': success,
             'error': error
@@ -366,7 +366,7 @@ class MMExperimentLogger:
         self.log_event({
             "type": "chart_generation",
             "task_id": task_id,
-            "chart_num": chart_num,
+            "num_charts": num_charts,
             "description": description[:100] + '...' if len(description) > 100 else description,
             "success": success,
             "error": error

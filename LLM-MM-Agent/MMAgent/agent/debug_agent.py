@@ -94,9 +94,7 @@ class DebugAgent:
                         if similar:
                             diagnosis['context_info']['suggested_alternatives'] = similar
                             diagnosis['suggested_fix'] += (
-                                f"
-
-Did you mean: {similar}? "
+                                f"\n\nDid you mean: {similar}? "
                                 f"Available columns: {available_columns}"
                             )
 
@@ -106,8 +104,7 @@ Did you mean: {similar}? "
     def _find_column_usage(code: str, column_name: str) -> List[Dict[str, int]]:
         """Find all usages of a column name in code."""
         usages = []
-        lines = code.split('
-')
+        lines = code.split('\n')
 
         for i, line in enumerate(lines, start=1):
             if f"['{column_name}']" in line or f'["{column_name}"]' in line:
@@ -159,25 +156,25 @@ Did you mean: {similar}? "
         if diagnosis.get('context_info'):
             context = diagnosis['context_info']
             if 'available_columns' in context:
-                prompt += f"
+                prompt += f"""
 
 ## Available Data Columns
 ```
 {context['available_columns']}
 ```
-"
-                prompt += "**CRITICAL**: Use ONLY these column names.
-"
+"""
+                prompt += "**CRITICAL**: Use ONLY these column names.\n"
 
-        prompt += f"
+        prompt += f"""
 ## Original Code
 ```python
 {original_code}
 ```
-"
-        prompt += "
+"""
+
+        prompt += """
 ## Instructions
 Fix the error based on the analysis above.
-"
+"""
 
         return prompt

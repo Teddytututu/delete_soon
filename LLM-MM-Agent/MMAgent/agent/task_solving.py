@@ -23,8 +23,12 @@ import json
 import time
 import ast
 import re
+import logging
 # CRITICAL FIX: Import robust_json_load for unified JSON parsing
 from utils.utils import robust_json_load
+
+# Initialize logger for this module
+logger = logging.getLogger(__name__)
 
 
 class _SafeDict(dict):

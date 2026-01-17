@@ -373,6 +373,8 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     # CRITICAL FIX #5: Use unified DataManager for file filtering
     # Get canonical input files (whitelist managed)
     input_paths = [str(f) for f in data_mgr.get_canonical_input_files()]
+    # Extract just filenames for comparison when filtering generated files
+    input_data_files = [os.path.basename(p) for p in input_paths]
 
     # Get task-generated output files (auto-discovered)
     output_paths = [str(f) for f in data_mgr.get_task_generated_files()]

@@ -456,44 +456,44 @@ class ContextExtractor:
     
     def _get_task_analysis_context(self, path: List[str], data: Dict[str, Any]) -> Dict[str, Any]:
         """Get context for task analysis sections"""
-        task_num = self._extract_task_number(path[1])
-        if not self._is_valid_task_index(task_num, data):
+        task_idx = self._extract_task_index(path[1])
+        if not self._is_valid_task_index(task_idx, data):
             return {}
-            
-        task_data = data["tasks"][task_num]
+
+        task_data = data["tasks"][task_idx]
         keys = ['task_analysis', 'task_description']
         return {
-            f'task_{task_num+1}': {
+            f'task_{task_idx+1}': {
                 k: v for k, v in task_data.items() if k in keys
             }
         }
-    
+
     def _get_model_setup_context(self, path: List[str], data: Dict[str, Any]) -> Dict[str, Any]:
         """Get context for model setup sections"""
-        task_num = self._extract_task_number(path[1])
-        if not self._is_valid_task_index(task_num, data):
+        task_idx = self._extract_task_index(path[1])
+        if not self._is_valid_task_index(task_idx, data):
             return {}
-            
-        task_data = data["tasks"][task_num]
+
+        task_data = data["tasks"][task_idx]
         # CRITICAL FIX: computational_solving.py writes 'modeling_formulas', not 'preliminary_formulas'
         # Changed from: keys = ['preliminary_formulas', 'mathematical_modeling_process']
         keys = ['modeling_formulas', 'mathematical_modeling_process']
         return {
-            f'task_{task_num+1}': {
+            f'task_{task_idx+1}': {
                 k: task_data.get(k, "") for k in keys
             }
         }
-    
+
     def _get_model_calculation_context(self, path: List[str], data: Dict[str, Any]) -> Dict[str, Any]:
         """Get context for model calculation sections"""
-        task_num = self._extract_task_number(path[1])
-        if not self._is_valid_task_index(task_num, data):
+        task_idx = self._extract_task_index(path[1])
+        if not self._is_valid_task_index(task_idx, data):
             return {}
-            
-        task_data = data["tasks"][task_num]
+
+        task_data = data["tasks"][task_idx]
         keys = ['mathematical_modeling_process', 'execution_result', 'solution_interpretation', 'subtask_outcome_analysis']
         return {
-            f'task_{task_num+1}': {
+            f'task_{task_idx+1}': {
                 k: task_data.get(k, "") for k in keys
             }
         }
@@ -517,14 +517,14 @@ class ContextExtractor:
                 path[0] == "Solution to the Problem" and 
                 path[1].startswith("Task ") and 
                 path[2] == "Model Calculation")
-    
-    def _extract_task_number(self, task_string: str) -> int:
-        """Extract task number from strings like 'Task 1 Analysis'"""
+
+    def _extract_task_index(self, task_string: str) -> int:
+        """Extract task index from strings like 'Task 1 Analysis'"""
         try:
             return int(task_string.split()[1]) - 1  # Convert to 0-indexed
         except (IndexError, ValueError):
             return -1
-    
+
     def _is_valid_task_index(self, index: int, data: Dict[str, Any]) -> bool:
         """Check if the task index is valid"""
         return 0 <= index < len(data.get("tasks", []))

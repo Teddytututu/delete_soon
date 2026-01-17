@@ -261,7 +261,7 @@ class ExecutionFSM:
             # Generate single chart
             charts = cc.create_charts_with_images(
                 paper_content=str(input_data),
-                chart_num=1,
+                num_charts=1,
                 output_dir=input_data['output_dir'],
                 data_files=input_data.get('data_files', [])
             )

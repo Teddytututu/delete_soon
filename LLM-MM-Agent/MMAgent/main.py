@@ -374,7 +374,7 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
                 solution = computational_solving(
                     llm, coordinator, with_code, problem, task_id, task_description,
                     task_analysis, task_modeling_formulas, task_modeling_method,
-                    dependent_file_prompt, config, solution, name, output_dir, dataset_dir, logger_manager
+                    dependent_file_prompt, config, solution, name, output_dir, dataset_path, logger_manager
                 )
 
                 task_duration = int(time.time() - task_start_time)
