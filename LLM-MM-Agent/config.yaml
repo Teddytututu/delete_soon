@@ -1,0 +1,18 @@
+top_method_num: 6
+problem_analysis_round: 3
+problem_modeling_round: 3
+task_formulas_round: 5
+tasknum: 5
+chart_num: 5
+
+# Logging Configuration
+logging:
+  console_level: INFO
+  log_to_file: true
+  log_rotation: true
+  max_log_size_mb: 50
+  backup_count: 5
+  log_llm_api: true
+  log_code_execution: true
+  log_chart_generation: true
+  debug_mode: true

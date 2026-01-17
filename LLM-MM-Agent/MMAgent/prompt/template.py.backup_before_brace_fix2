@@ -1,0 +1,2664 @@
+PROBLEM_PROMPT = """\
+Problem Background:
+{problem_background}
+
+Problem Requirement:
+{problem_requirement}
+{addendum}
+{data_summary}
+"""
+
+
+DATA_DESCRIPTION_PROMPT = """\
+Data Description:
+{data_description}
+
+---
+
+Your task is to generate a detailed summary of the dataset based on the dataset description provided. It needs to cover comprehensive information, but not explain each field one by one. Using plain text to describe in a single paragraph, without any Markdown formatting or syntax.
+"""
+
+
+PROBLEM_ANALYSIS_PROMPT = """\
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+---
+
+You are tasked with analyzing a mathematical modeling problem with a focus on the underlying concepts, logical reasoning, and assumptions that inform the solution process. Begin by considering the nature of the problem in its broader context. What are the primary objectives of the model, and how do they shape the way you approach the task? Think critically about the assumptions that may be inherently embedded in the problem. What implicit beliefs or constraints have been set up, either explicitly or implicitly, within the problem's description? Reflect on how these assumptions might influence the interpretation and application of any potential solutions. 
+
+Dive deeper into the relationships and interdependencies between the different components of the problem. What are the potential hidden complexities that may arise from these interconnections? Are there any conflicts or tensions between different aspects of the problem that need to be resolved? Explore how these interdependencies might lead to unforeseen challenges and require revisiting initial assumptions or redefining the parameters of the task. 
+
+Consider how the complexity of the problem may evolve across different scales or over time. Are there time-dependent factors or long-term consequences that should be accounted for, especially in terms of the stability or sustainability of the model's outcomes? Think about how the model's behavior might change under different scenarios, such as variations in input or changes in external conditions. Reflect on whether any simplifications or idealizations in the problem might inadvertently obscure key dynamics that are crucial for an accurate representation.
+
+In your analysis, also give attention to possible alternative perspectives on the problem. Are there different ways to frame the issue that could lead to distinct modeling approaches or solution strategies? How would those alternative perspectives impact the overall approach? Additionally, evaluate the potential risks or uncertainties inherent in the problem, especially when it comes to choosing between competing modeling approaches. Consider how the outcomes might vary depending on the choices you make in constructing the model, and how you would manage such trade-offs.
+
+Finally, reflect on the dynamic nature of the modeling process itself. How might your understanding of the problem evolve as you continue to explore its intricacies? Ensure that your thought process remains flexible, with a readiness to revise earlier conclusions as new insights emerge. The goal is to maintain a reflective, iterative analysis that adapts to deeper understandings of the task at hand, rather than pursuing a fixed or rigid approach.
+
+{user_prompt}
+
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+
+PROBLEM_ANALYSIS_CRITIQUE_PROMPT = """\
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+# Problem Analysis:
+{problem_analysis}
+
+---
+
+Critically examine the analysis results of the given mathematical modeling problem, focusing on the following aspects:
+
+1. Depth of Thinking: Evaluate whether the analysis demonstrates a comprehensive understanding of the underlying problem. Does it go beyond surface-level observations? Are the assumptions, limitations, and potential implications of the results carefully considered? Assess whether the analysis adequately addresses both the broader context and specific intricacies of the problem.
+2. Novelty of Perspective: Analyze the originality of the approach taken in the analysis. Does it introduce new insights or merely rehash well-established methods or solutions? Are alternative perspectives or unconventional techniques explored, or is the analysis constrained by a narrow set of assumptions or typical approaches?
+3. Critical Evaluation of Results: Consider the extent to which the analysis critically engages with the results. Are the conclusions drawn from the analysis well-supported by the mathematical findings, or do they overlook key uncertainties or counterexamples? Does the analysis acknowledge potential contradictions or ambiguities in the data?
+4. Rigor and Precision: Assess the level of rigor applied in the analysis. Are the steps logically consistent and mathematically sound, or are there overlooked errors, gaps, or assumptions that undermine the conclusions? Does the analysis exhibit a clear, methodical approach, or is it characterized by vague reasoning and imprecision?
+5. Contextual Awareness: Evaluate how well the analysis situates itself within the broader landscape of mathematical modeling in this area. Does it consider previous work or developments in the field? Is there any indication of awareness of real-world implications, practical constraints, or ethical concerns, if applicable?
+
+Critique the analysis without offering any constructive suggestions--your focus should solely be on highlighting weaknesses, gaps, and limitations within the approach and its execution.
+"""
+
+
+PROBLEM_ANALYSIS_IMPROVEMENT_PROMPT = """\
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+# Problem Analysis:
+{problem_analysis}
+
+# Problem Analysis Critique:
+{problem_analysis_critique}
+
+---
+
+Refine and improve the existing problem analysis based on the critique provided to generate insightful analysis. 
+
+Provide the improved version directly. DO NOT mention any previous analysis content and deficiencies in the improved analysis. Just refer to the above critical suggestions and directly give the new improved analysis.
+{user_prompt}
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+
+IMPROVED PROBLEM ANALYSIS:
+"""
+
+
+METHOD_CRITIQUE_PROMPT = """\
+## Problem Description
+
+{problem_description}
+
+## Method List
+
+{methods}
+
+## Evaluation Task
+
+Evaluate each method based on the following dimensions. For each dimension, consider the associated criteria and assign a score from 1 (poor) to 5 (excellent). 
+
+## Criteria Dimensions
+
+**1. Assumptions:** Whether the foundational mathematical assumptions align with the intrinsic characteristics of the problem.  
+For instance, linear regression assumes linear relationships but fails to capture nonlinear dynamics (e.g., exponential growth). Similarly, deterministic models (e.g., ordinary differential equations) may overlook critical uncertainties in inherently stochastic systems (e.g., financial markets or biological processes). Misaligned assumptions risk oversimplification or systematic bias.
+
+**2. Structure:** The mathematical framework's ability to mirror the problem's inherent logic, hierarchy, or spatiotemporal relationships.  
+Network-based problems (e.g., traffic flow or social interactions) demand graph theory or network flow models, while hierarchical systems (e.g., ecological food webs) may require multi-stage or layered modeling. A mismatch here--such as using static equations for time-dependent phenomena--renders the model structurally inadequate.
+
+**3. Variables:** Compatibility between the model's mathematical tools and the variable types in the problem (continuous, discrete, categorical, stochastic, etc.).  
+For example, logistic regression or decision trees suit categorical outcomes, while partial differential equations better model spatially continuous systems. High-dimensional sparse data (e.g., genomics) may necessitate dimensionality reduction (PCA) or sparse optimization, whereas rigid variable handling leads to inefficiency or inaccuracy.
+
+**4. Dynamics:** Alignment of the model's temporal or dynamic properties with the problem's evolutionary behavior.  
+Short-term forecasting might use static models (e.g., linear regression), but long-term ecological or economic systems require dynamic frameworks (e.g., differential equations or agent-based models). Ignoring time delays (e.g., policy impacts in economics) or feedback loops often invalidates predictions.
+
+**5. Solvability:** The existence and practicality of solutions under real-world constraints.  
+High-dimensional non-convex optimization problems (e.g., neural network training) may rely on heuristic algorithms (genetic algorithms) rather than exact solutions. Similarly, NP-hard problems (e.g., traveling salesman) demand approximations to balance computational feasibility and precision. Overly complex models risk theoretical elegance without actionable results.
+
+## Instructions
+1. For each method in the Method List, score its performance on **all** evaluation dimensions.
+2. Return results in JSON format, including the method index and scores for each dimension.
+
+## Output Example (Only return the JSON output, no other text)
+```json
+{{
+  "methods": [
+    {{
+      "method_index": 1,
+      "scores": {{
+        "Assumptions": 4,
+        "Structure": 3,
+        // Include other dimensions here
+      }}
+    }},
+    // Include other methods here
+  ]
+}}
+```
+
+## Required Output
+Provide the JSON output below:
+```json
+"""
+
+
+PROBLEM_MODELING_PROMPT = """\
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+# Problem Analysis:
+{problem_analysis}
+
+---
+
+You are tasked with designing an innovative mathematical model to address the given problem. Begin by proposing a comprehensive model that integrates both theoretical and practical considerations, ensuring that the formulation is aligned with the problem's core objectives. This should include a clear set of assumptions that underpin the model, which may involve simplifications, approximations, or idealizations necessary to make the problem tractable, yet still retain fidelity to the real-world phenomena you aim to represent. Clearly define the variables, parameters, and constraints that will shape the mathematical formulation. 
+
+Next, develop the key equations and relationships that will govern the model. Pay attention to the interdependencies between the various components of the system. These could involve differential equations, algebraic relations, optimization criteria, or probabilistic models, depending on the nature of the problem. Be sure to consider how different aspects of the model might interact, and whether feedback loops or non-linearities should be incorporated. Explore potential novel formulations or extensions of existing models that could offer new insights into the problem's dynamics. If applicable, propose advanced methods such as multi-scale modeling, agent-based simulations, or data-driven approaches like machine learning to improve the model's adaptability or accuracy.
+
+Once the model structure is established, outline a clear strategy for solving it. This may involve analytical techniques such as closed-form solutions or approximations, numerical methods like finite element analysis or Monte Carlo simulations, or optimization algorithms for parameter estimation. Be explicit about the computational resources required and the level of precision expected. If the model is complex or high-dimensional, suggest ways to reduce the computational burden, such as dimensionality reduction, surrogate models, or parallelization techniques. 
+
+Additionally, consider how the model might evolve over time or under different conditions. Would the model require recalibration or adaptation in the face of changing circumstances? If applicable, provide strategies for sensitivity analysis to assess how the model responds to changes in its assumptions or parameters. Reflect on how the model's predictions can be validated through empirical data or experimental results, ensuring that the model provides actionable insights and maintains real-world relevance.
+
+Finally, propose avenues for further refinement or extension of the model. As new data becomes available or the problem context shifts, what adjustments would you make to improve the model's accuracy or applicability? Explore the possibility of incorporating new dimensions into the model, such as incorporating uncertainty quantification, dynamic optimization, or considering long-term sustainability of the proposed solutions. The ultimate goal is to develop a robust, flexible, and innovative model that not only addresses the problem at hand but also offers deeper insights into its underlying complexities.
+
+{user_prompt}
+
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+
+PROBLEM_MODELING_CRITIQUE_PROMPT = """\
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+# Problem Analysis:
+{problem_analysis}
+
+# Modeling Solution:
+{modeling_solution}
+
+---
+
+Critically examine the analysis results of the given mathematical modeling solution, focusing on the following aspects:
+
+1. Problem Analysis and Understanding:
+- Clarity of the problem definition: Does the solution demonstrate a clear and comprehensive understanding of the problem? Are all relevant variables, constraints, and objectives identified and well-defined? If not, which aspects of the problem may have been misunderstood or overlooked?
+- Contextualization and framing: How well does the model account for the context in which the problem is situated? Are there any contextual factors that are essential but were not addressed?
+- Scope of the problem: Is the problem's scope appropriately defined? Does the model include all the necessary details, or are there significant components that were neglected or oversimplified?
+
+2. Model Development and Rigor:
+- Formulation of the mathematical model: How well is the model constructed mathematically? Does it align with established modeling practices in the relevant domain? Are the mathematical formulations--such as equations, algorithms, or optimization methods--correct and robust?
+- Modeling techniques: What modeling approaches or techniques were used (e.g., linear programming, system dynamics, statistical modeling, etc.)? Are they the most appropriate for the problem at hand? What alternative approaches could have been considered, and how might they impact the solution?
+- Validation and verification: Was the model tested for consistency and accuracy? Are there validation steps in place to ensure the model behaves as expected under a variety of conditions? What specific methods were used for this validation (e.g., cross-validation, sensitivity analysis, etc.)?
+
+3. Data and Results Analysis:
+- Data quality and relevance: Were there any significant issues with data availability or quality that could have influenced the model's results?
+- Interpretation of results: How well were the results analyzed and interpreted? Were the outcomes consistent with the problem's real-world implications? Are there any discrepancies between the model's results and known empirical observations?
+- Sensitivity and robustness analysis: Did the model undergo a sensitivity analysis to determine how the results vary with changes in input parameters? Were the results robust across different assumptions, and if not, what are the implications for the solution's reliability?
+
+4. Assumptions and Limitations:
+- Explicit and implicit assumptions: What assumptions underlie the model, and are they clearly articulated? Are these assumptions reasonable, and how might they affect the model's predictions? Were any critical assumptions left implicit or unaddressed?
+- Limitations of the model: What limitations are inherent in the model, and how do they affect its validity and reliability? Are there elements of the problem that are inherently difficult or impossible to model with the chosen approach? Were simplifications made, and what are the trade-offs involved?
+- Model boundaries: Does the model appropriately define its boundaries, and are there any critical factors that lie outside the model's scope but could significantly influence the results?
+
+5. Practicality and Applicability:
+- Real-world applicability: To what extent can the model be applied to real-world scenarios? 
+- Practical implementation: How would this model be implemented in practice? What would be the required infrastructure, and what challenges would need to be addressed during implementation? 
+
+Critique the analysis without offering any constructive suggestions--your focus should solely be on highlighting weaknesses, gaps, and limitations within the approach and its execution.
+"""
+
+
+PROBLEM_MODELING_IMPROVEMENT_PROMPT = """\
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+# Problem Analysis:
+{problem_analysis}
+
+# Modeling Solution:
+{modeling_solution}
+
+# Modeling Solution Critique:
+{modeling_solution_critique}
+
+---
+
+Refine and improve the existing modeling solution based on the critique provided. The goal is to enhance the formulation, structure, and overall effectiveness of the model while addressing the identified gaps, flaws, or limitations. Propose more appropriate assumptions, more robust mathematical techniques, or alternative modeling approaches if necessary. Focus on improving the model's relevance, accuracy, and computational feasibility while also ensuring its ability to capture the complexity of the problem in real-world contexts.
+
+Provide a new version of the modeling solution that integrates these improvements directly. DO NOT mention any previous solution content and deficiencies.
+
+{user_prompt}
+
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+
+IMPROVED MODELING SOLUTION: 
+"""
+
+
+DECOMPOSE_PRINCIPLE_PROMPT = """\
+The solution to a mathematical modeling problem is typically broken down into a series of subtasks, each addressing a different aspect of the overall challenge. Based on the examples provided below, summarize what each subtask in tasks 1 through {tasknum} generally involves, with a focus on the principles of task decomposition in mathematical modeling.
+
+<examples>
+
+{examples}
+
+</examples>
+
+Requirements:
+1. The summary should focus on the general methods and approaches used in mathematical modeling tasks, not tied to any specific examples or cases provided.
+2. The response should not include any details specific to the examples in order to avoid providing any implicit solutions or insights from them.
+3. The summary should present a theoretical description of the techniques used at each stage of task decomposition, without any reference to particular problems or contexts.
+4. Each subtask should be described as comprehensively and in as much detail as possible within a single paragraph, capturing the essential steps and considerations for that task in a general mathematical modeling framework. The description should be comprehensive, highlighting the key methodologies without resorting to bullet points, numbered lists, or overly formalized structure.
+5. Do not provide any form of examples or mention any instances.
+"""
+
+
+TASK_DECOMPOSE_PROMPT = """\
+# Decompose Principle:
+{decomposed_principle}
+
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+# Problem Analysis:
+{problem_analysis}
+
+# Modeling Solution:
+{modeling_solution}
+
+---
+
+Please decompose the given modeling solution into {tasknum} distinct and well-defined subtasks that collectively contribute to the overall objective. These subtasks should be clearly separated in their focus, each addressing a specific aspect of the modeling process. The goal is to break down the solution into key stages or methodologies, ensuring that all components of the solution are covered without redundancy. For each subtask, the approach or technique should be explicitly described, detailing the specific data, algorithms, or models required. The decomposition should reflect a logical and comprehensive path toward completing the task, with each part having a clear purpose and contributing to the final result.
+{user_prompt}
+Each subtask should be described as comprehensively and in as much detail as possible within a single paragraph using plain text and seperated by '---' for each subtask. All the contents and details of the original solution need to be covered by the {tasknum} subtasks without omission. 
+"""
+
+
+TASK_DESCRIPTION_PROMPT = """\
+# Mathematical Modeling Problem:
+{modeling_problem}
+
+# Problem Analysis:
+{problem_analysis}
+
+# Modeling Solution:
+{modeling_solution}
+
+# Decomposed Subtasks:
+{decomposed_subtasks}
+
+---
+
+You are tasked with refining and improving the description of subtask {task_i} to ensure it is more detailed, clear, and focused. Provide a precise and comprehensive explanation of the task, specifically elaborating on its scope, goals, and methodology without venturing into other subtasks. Make sure the description includes clear and concise language that defines the necessary steps, techniques, or approaches required for this subtask. If applicable, specify the data inputs, tools, or models to be used, but do not introduce analysis, results, or discussions related to other components of the modeling process. The goal is to enhance the clarity, depth, and precision of this subtask description, ensuring it is fully understood on its own without needing further explanation.
+The description of subtask {task_i} should be as comprehensive and in as much detail as possible within a single paragraph using plain text.
+"""
+
+TASK_ANALYSIS_PROMPT = """\
+# Task Description:
+{task_description}
+
+---
+{prompt}
+
+You are collaborating as part of a multi-agent system to solve a complex mathematical modeling problem. Each agent is responsible for a specific task, and some preprocessing or related tasks may have already been completed by other agents. It is crucial that you **do not repeat any steps that have already been addressed** by other agents. Instead, rely on their outputs when necessary and focus solely on the specific aspects of the task assigned to you.
+
+Provide a thorough and nuanced analysis of the task at hand, drawing on the task description as the primary source of context. Begin by elucidating the core objectives and scope of the task, outlining its significance within the larger context of the project or research. Consider the potential impact or outcomes that are expected from the task, whether they relate to solving a specific problem, advancing knowledge, or achieving a particular practical application. Identify any challenges that may arise during the task execution, including technical, logistical, or theoretical constraints, and describe how these might influence the process or outcomes. In addition, carefully highlight any assumptions that are being made about the data, environment, or system involved in the task, and discuss any external factors that could shape the understanding or execution of the task. Ensure that the analysis is framed in a way that will guide future steps or inform the next stages of work.
+{user_prompt}
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text and LaTeX for formulas only, without any Markdown formatting or syntax. Written as one paragraph. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+TASK_FORMULAS_PROMPT = """\
+# Reference Modeling Methods:
+{modeling_methods}
+
+{data_summary}
+
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+---
+{prompt}
+
+You are collaborating as part of a multi-agent system to solve a complex mathematical modeling problem. Each agent is responsible for a specific task, and some preprocessing or related tasks may have already been completed by other agents. It is crucial that you **do not repeat any steps that have already been addressed** by other agents. Instead, rely on their outputs when necessary and focus solely on the specific aspects of the task assigned to you.
+
+You are tasked with developing a set of precise, insightful, and comprehensive mathematical formulas that effectively model the problem described in the task. Begin by conducting an in-depth analysis of the system, process, or phenomenon outlined, identifying all relevant variables, their interdependencies, and the fundamental principles, laws, or constraints that govern the behavior of the system, as applicable in the relevant field. Clearly define all variables, constants, and parameters, and explicitly state any assumptions, approximations, or simplifications made during the formulation process, including any boundary conditions or initial conditions if necessary.
+
+Ensure the formulation considers the full scope of the problem, and if applicable, incorporate innovative mathematical techniques. Your approach should be well-suited for practical computational implementation, addressing potential numerical challenges, stability concerns, or limitations in simulations. Pay careful attention to the dimensional consistency and units of all terms to guarantee physical or conceptual validity, while remaining true to the theoretical foundations of the problem.
+
+In the process of deriving the mathematical models, provide a clear, step-by-step explanation of the reasoning behind each formula, highlighting the derivation of key expressions and discussing any assumptions or trade-offs that are made. Identify any potential sources of uncertainty, limitations, or approximations inherent in the model, and provide guidance on how to handle these within the modeling framework.
+
+The resulting equations should be both flexible and scalable, allowing for adaptation to different scenarios or the ability to be tested against experimental or real-world data. Strive to ensure that your model is not only rigorous but also interpretable, balancing complexity with practical applicability. List all modeling equations clearly in LaTeX format, ensuring proper mathematical notation and clarity of presentation. Aim for a model that is both theoretically sound and practically relevant, offering a balanced approach to complexity and tractability in its use.
+{user_prompt}
+Respond as comprehensively and in as much detail as possible, ensuring clarity, depth, and rigor throughout. Using plain text and LaTeX for formulas. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+
+TASK_FORMULAS_CRITIQUE_PROMPT = """\
+{data_summary}
+
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{modeling_formulas}
+
+---
+
+The goal of this task is to critically evaluate the modeling formulas used to represent a given mathematical modeling problem. Your analysis should address the following dimensions: accuracy and rigor, innovation and insight, and the applicability of the models to real-world scenarios.
+
+1. Accuracy and Rigor:
+
+- Formula Integrity:  
+  Evaluate whether the mathematical models and the corresponding formulas are mathematically sound and consistent with the underlying assumptions of the problem. Are the formulas properly derived, free from logical errors, and reflective of the relevant domain knowledge?  
+  - Are any simplifications or approximations made, and if so, are they justifiable within the context of the model's scope?
+  - Examine the assumptions made in formulating the model. Are these assumptions realistic, and how do they affect the model's precision and robustness?
+
+2. Innovation and Insight:
+
+- Novelty of Approach:  
+  Critique the originality of the modeling approach. Does the model present a new or unconventional way of solving the problem, or does it simply rely on established methodologies without offering new insights?  
+  - Consider whether any innovative methods, such as the introduction of novel variables or the use of innovative computational techniques, contribute to improving the model.
+
+- Theoretical Insight:  
+  Evaluate the depth of the theoretical insights provided by the model. Does it offer a fresh perspective or new understanding of the problem? How well does it illuminate the key dynamics and relationships within the system under study?  
+  - Does the model reveal previously unnoticed phenomena, or does it suggest new directions for further research?
+
+- Integration of Existing Knowledge:  
+  Assess the extent to which the model integrates existing mathematical, theoretical, and empirical work. Does it build on prior research, and if so, does it do so in a way that adds substantial value or clarity? Are there gaps where additional cross-disciplinary knowledge could enhance the model?
+
+---
+
+3. Applicable:
+
+- Real-World Relevance:  
+  Evaluate the model's practical applicability. How well does it apply to real-world problems, and to what extent does it provide actionable insights for decision-making or problem-solving in the field?  
+
+Critique the analysis without offering any constructive suggestions--your focus should solely be on highlighting weaknesses, gaps, and limitations within the formulas.
+"""
+
+
+TASK_FORMULAS_IMPROVEMENT_PROMPT = """\
+{data_summary}
+
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{modeling_formulas}
+
+# Task Modeling Formulas Critique:
+{modeling_formulas_critique}
+
+---
+
+Based on the provided critique and analysis, refine the existing modeling formulas to address the identified limitations and gaps. 
+
+Respond as comprehensively and in as much detail as possible, ensuring clarity, depth, and rigor throughout. Using plain text and LaTeX for formulas. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+{user_prompt}
+Provide a new version of the task modeling formulas that integrates these improvements directly. DO NOT mention any previous formulas content and deficiencies.
+
+IMPROVED TASK MODELING FORMULAS:
+"""
+
+
+TASK_MODELING_PROMPT = """\
+{data_summary}
+
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{modeling_formulas}
+
+---
+{prompt}
+
+You are collaborating as part of a multi-agent system to solve a complex mathematical modeling problem. Each agent is responsible for a specific task, and some preprocessing or related tasks may have already been completed by other agents. It is crucial that you **do not repeat any steps that have already been addressed** by other agents. Instead, rely on their outputs when necessary and focus solely on the specific aspects of the task assigned to you.
+
+Please continue the modeling formula section by building upon the previous introduction to the formula. Provide comprehensive and detailed explanations and instructions that elaborate on each component of the formula. Describe the modeling process thoroughly, including the underlying assumptions, step-by-step derivations, and any necessary instructions for application. Expand on the formula by incorporating relevant mathematical expressions where appropriate, ensuring that each addition enhances the reader's understanding of the model. Make sure to seamlessly integrate the new content with the existing section, maintaining a natural flow and avoiding any repetition or conflicts with previously covered material. Your continuation should offer a clear and in-depth exploration of the modeling formula, providing all necessary details to facilitate a complete and coherent understanding of the modeling process.
+{user_prompt}
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+
+TASK_MODELING_CRITIQUE_PROMPT = """\
+{data_summary}
+
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{modeling_formulas}
+
+# Task Modeling Process:
+{modeling_process}
+
+---
+
+Critically examine the analysis results of the given mathematical modeling solution, focusing on the following aspects:
+
+1. Problem Analysis and Understanding:
+- Clarity of the problem definition: Does the solution demonstrate a clear and comprehensive understanding of the problem? Are all relevant variables, constraints, and objectives identified and well-defined? If not, which aspects of the problem may have been misunderstood or overlooked?
+- Contextualization and framing: How well does the model account for the context in which the problem is situated? Are there any contextual factors that are essential but were not addressed?
+- Scope of the problem: Is the problem's scope appropriately defined? Does the model include all the necessary details, or are there significant components that were neglected or oversimplified?
+
+2. Model Development and Rigor:
+- Formulation of the mathematical model: How well is the model constructed mathematically? Does it align with established modeling practices in the relevant domain? Are the mathematical formulations--such as equations, algorithms, or optimization methods--correct and robust?
+- Modeling techniques: What modeling approaches or techniques were used (e.g., linear programming, system dynamics, statistical modeling, etc.)? Are they the most appropriate for the problem at hand? What alternative approaches could have been considered, and how might they impact the solution?
+- Validation and verification: Was the model tested for consistency and accuracy? Are there validation steps in place to ensure the model behaves as expected under a variety of conditions? What specific methods were used for this validation (e.g., cross-validation, sensitivity analysis, etc.)?
+
+3. Data and Results Analysis:
+- Data quality and relevance: Were there any significant issues with data availability or quality that could have influenced the model's results?
+- Interpretation of results: How well were the results analyzed and interpreted? Were the outcomes consistent with the problem's real-world implications? Are there any discrepancies between the model's results and known empirical observations?
+- Sensitivity and robustness analysis: Did the model undergo a sensitivity analysis to determine how the results vary with changes in input parameters? Were the results robust across different assumptions, and if not, what are the implications for the solution's reliability?
+
+4. Assumptions and Limitations:
+- Explicit and implicit assumptions: What assumptions underlie the model, and are they clearly articulated? Are these assumptions reasonable, and how might they affect the model's predictions? Were any critical assumptions left implicit or unaddressed?
+- Limitations of the model: What limitations are inherent in the model, and how do they affect its validity and reliability? Are there elements of the problem that are inherently difficult or impossible to model with the chosen approach? Were simplifications made, and what are the trade-offs involved?
+- Model boundaries: Does the model appropriately define its boundaries, and are there any critical factors that lie outside the model's scope but could significantly influence the results?
+
+5. Practicality and Applicability:
+- Real-world applicability: To what extent can the model be applied to real-world scenarios? 
+- Practical implementation: How would this model be implemented in practice? What would be the required infrastructure, and what challenges would need to be addressed during implementation? 
+
+Critique the analysis without offering any constructive suggestions--your focus should solely be on highlighting weaknesses, gaps, and limitations within the approach and its execution.
+"""
+
+
+TASK_MODELING_IMPROVEMENT_PROMPT = """\
+{data_summary}
+
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{modeling_formulas}
+
+# Task Modeling Process:
+{modeling_process}
+
+# Task Modeling Process Critique:
+{modeling_process_critique}
+
+---
+
+Refine and improve the existing modeling process based on the critique provided. The goal is to enhance the formulation, structure, and overall effectiveness of the model while addressing the identified gaps, flaws, or limitations. Propose more appropriate assumptions, more robust mathematical techniques, or alternative modeling approaches if necessary. Focus on improving the model's relevance, accuracy, and computational feasibility while also ensuring its ability to capture the complexity of the problem in real-world contexts.
+
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+{user_prompt}
+Provide a new version of the modeling process that integrates these improvements directly. DO NOT mention any previous process content and deficiencies.
+
+IMPROVED MODELING PROCESS:
+"""
+
+TASK_CODING_PROMPT = """\
+# Dataset Path:
+{data_file}
+
+# Data Description:
+{data_summary}
+
+# Variable Description:
+{variable_description}
+
+# Other files (Generated by Other Agents):
+{dependent_file_prompt}
+
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{modeling_formulas}
+
+# Task Modeling Process:
+{modeling_process}
+
+# Code Template:
+{code_template}
+
+---
+
+## Role & Collaboration:
+You are an expert programmer working as part of a multi-agent system. Your role is to implement the code based on the provided dataset (**refer to the Dataset Path, Dataset Description, and Variable Description**) **or preprocessed files generated by other agents** (**refer to "Other Files"**), along with the modeling process and given code template. Other agents will use your results to make decisions, but they will **not** review your code. Therefore, it is crucial that:
+1. **Ensure the code is executable** and will successfully run without errors, producing the expected results. **It should be tested to verify it works in the intended environment**.
+2. **Reuse files from "Other Files" whenever possible** instead of redoing tasks that have already been completed by other agents.
+3. **All data processing steps must save the processed results to local files (CSV, JSON, or pickle) for easy access by other agents.**
+4. **The output should be as detailed as possible**, including intermediate results and final outputs.
+5. **Ensure transparency** by logging key computation steps and providing clear outputs.
+
+## Implementation Guidelines:
+- **Prioritize using files from "Other Files" before processing raw data** to avoid redundant computation.
+- Follow the provided **modeling formulas** and **modeling process** precisely.
+- The **code must be executable**: ensure that the Python code you generate runs without errors. Do not just focus on producing the correct output format; **focus on producing a working solution** that can be executed successfully in a Python environment.
+- **Store intermediate and final data processing results to local** in appropriate formats (e.g., CSV, JSON, or pickle).
+- Provide **detailed print/logging outputs** to ensure that other agents can understand the results without needing to read the code.
+
+## CRITICAL: Mandatory Imports & Environment Setup (DO NOT SKIP!)
+
+**Your code MUST start with these exact imports at the very top:**
+```python
+import sys
+import io
+import os
+import pandas as pd
+import numpy as np
+
+# CRITICAL: Force UTF-8 output to prevent UnicodeEncodeError on Windows
+# This fixes the 'gbk codec can't encode character' crash
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+```
+
+**WARNING**: Never forget these imports! Your code WILL crash with:
+- `NameError: name 'os' is not defined` if you use `os.path.join()` without importing os
+- `UnicodeEncodeError` if you print special characters without UTF-8 encoding
+
+## CRITICAL: Console Output Safety (Prevent Crashes!)
+
+**DO NOT print large data structures directly to console!**
+
+❌ **WRONG** (Will crash with UnicodeEncodeError):
+```python
+print(country_medals)  # Crashes if data contains special characters
+print(df)  # Too large, may have encoding issues
+```
+
+✅ **CORRECT** (Safe alternatives):
+```python
+# Option 1: Print summary only
+print(f"Country medals shape: {{country_medals.shape}}")
+print(f"Columns: {{country_medals.columns.tolist()}}")
+
+# Option 2: Save to file instead
+country_medals.to_csv('country_medals.csv', index=False, encoding='utf-8')
+print("[OK] Country medals saved to country_medals.csv")
+
+# Option 3: Print first few rows with encoding protection
+print("First 5 rows:")
+for idx, row in df.head().iterrows():
+    print(dict(row))  # Each row as dict is safer
+```
+
+## CRITICAL: Performance & Timeout Prevention (MANDATORY!)
+
+**Your code MUST complete within 300 seconds (5 minutes)**. Follow these rules:
+
+❌ **WRONG - Will timeout:**
+```python
+# Processing ALL data with slow operations
+for idx, row in df.iterrows():  # Millions of rows
+    complex_calculation(row)
+    time.sleep(0.001)  # Tiny delay becomes huge!
+```
+
+✅ **CORRECT - Fast and efficient:**
+```python
+# Strategy 1: Sample data for development (if dataset > 10,000 rows)
+if len(df) > 10000:
+    print(f"Large dataset detected ({{len(df)}} rows), sampling 10% for faster execution")
+    df_sample = df.sample(frac=0.1, random_state=42)
+    print(f"Working with {{len(df_sample)}} rows")
+else:
+    df_sample = df
+
+# Strategy 2: Use vectorized operations instead of loops
+df['new_column'] = df['col1'] + df['col2']  # Vectorized (fast)
+# NOT: for i in range(len(df)): df.at[i, 'new_column'] = df.at[i, 'col1'] + df.at[i, 'col2']
+
+# Strategy 3: Limit computationally intensive operations
+# Use efficient algorithms (e.g., .groupby() instead of nested loops)
+# Limit iterations (max 1000 for optimization loops)
+# Set early stopping conditions
+
+# Strategy 4: Progress tracking (detect slow code early)
+import time
+start_time = time.time()
+print("[START] Beginning computation...")
+
+# ... your code here ...
+
+elapsed = time.time() - start_time
+print(f"[DONE] Computation completed in {{elapsed:.1f}} seconds")
+if elapsed > 200:
+    print("[WARNING] Code is approaching timeout limit!")
+```
+
+**CRITICAL PERFORMANCE RULES:**
+1. **Sample large datasets** (>10,000 rows): Use `df.sample(frac=0.1)` for initial development
+2. **Avoid nested loops**: Use pandas vectorized operations (.groupby, .apply, .merge)
+3. **Limit iterations**: Maximum 1000 iterations for optimization loops
+4. **Set timeouts**: Use early stopping conditions
+5. **Track time**: Print elapsed time to detect slow operations early
+
+**P2-2 CRITICAL: Detailed Time Monitoring & Caching (MANDATORY!)**
+
+❌ **WRONG - No monitoring, will timeout mysteriously**:
+```python
+# No timing, no progress tracking
+result = expensive_operation(df)
+result2 = another_expensive_operation(result)
+# Suddenly: TIMEOUT after 300 seconds with no warning!
+```
+
+✅ **CORRECT - Comprehensive monitoring with checkpoints**:
+```python
+import time
+import os
+
+# ============================================================================
+# TIME MONITORING SETUP (MANDATORY FOR ALL TASKS!)
+# ============================================================================
+def timer(name=''):
+    # Context manager for timing code blocks
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            print(f"[TIMER] {{name or func.__name__}} - Starting...")
+            try:
+                result = func(*args, **kwargs)
+                elapsed = time.time() - start
+                print(f"[TIMER] {{name or func.__name__}} - Completed in {{elapsed:.1f}}s")
+                if elapsed > 60:
+                    print(f"[WARNING] {{name or func.__name__}} took {{elapsed:.1f}}s (> 60s)")
+                return result
+            except Exception as e:
+                elapsed = time.time() - start
+                print(f"[ERROR] {{name or func.__name__}} - Failed after {{elapsed:.1f}}s: {{e}}")
+                raise
+        return wrapper
+    return decorator
+
+# Cache file paths
+CACHE_DIR = 'cache'
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+def get_cache_path(name):
+    # Get cache file path for intermediate results
+    return os.path.join(CACHE_DIR, f'{name}.pkl')
+
+def load_cache(name, default=None):
+    # Load cached result if exists
+    cache_path = get_cache_path(name)
+    if os.path.exists(cache_path):
+        print(f"[CACHE] Loading cached '{name}' from {cache_path}")
+        import pickle
+        with open(cache_path, 'rb') as f:
+            return pickle.load(f)
+    return default
+
+def save_cache(name, data):
+    # Save result to cache
+    cache_path = get_cache_path(name)
+    print(f"[CACHE] Saving '{name}' to {cache_path}")
+    import pickle
+    with open(cache_path, 'wb') as f:
+        pickle.dump(data, f)
+
+# ============================================================================
+# MAIN TASK WITH MONITORING
+# ============================================================================
+def task1():
+    TOTAL_TIME_LIMIT = 300  # 5 minutes
+    CHECKPOINT_INTERVAL = 30  # Warn every 30 seconds
+    task_start = time.time()
+
+    print("=" * 60)
+    print(f"[TASK START] task1() - Time limit: {TOTAL_TIME_LIMIT}s")
+    print("=" * 60)
+
+    # Checkpoint 1: Data loading
+    checkpoint1_start = time.time()
+    print("\n[CHECKPOINT 1] Loading data...")
+
+    # Check cache first
+    cached_data = load_cache('loaded_data')
+    if cached_data is not None:
+        df = cached_data
+        print(f"[OK] Loaded from cache (shape: {df.shape})")
+    else:
+        # Load and process
+        df = pd.read_csv('clean_athletes.csv', encoding='utf-8-sig')
+        df = normalize_columns(df)
+
+        # Sample if too large
+        if len(df) > 10000:
+            print(f"[SAMPLE] Large dataset ({len(df)} rows), sampling to 10000")
+            df = df.sample(n=10000, random_state=42)
+
+        save_cache('loaded_data', df)
+        print(f"[OK] Loaded and cached data (shape: {df.shape})")
+
+    checkpoint1_elapsed = time.time() - checkpoint1_start
+    print(f"[CHECKPOINT 1] Completed in {checkpoint1_elapsed:.1f}s")
+    print(f"[PROGRESS] Total elapsed: {time.time() - task_start:.1f}s / {TOTAL_TIME_LIMIT}s")
+
+    # Check if approaching timeout
+    if time.time() - task_start > 200:
+        print("[WARNING] Approaching timeout! Simplifying remaining operations...")
+        # Simplify operations to finish on time
+        # ... simplified logic ...
+
+    # Checkpoint 2: Data processing
+    checkpoint2_start = time.time()
+    print("\n[CHECKPOINT 2] Processing data...")
+
+    # Check cache
+    cached_result = load_cache('processed_data')
+    if cached_result is not None:
+        result = cached_result
+        print(f"[OK] Loaded from cache")
+    else:
+        # Process with timeout protection
+        result = expensive_computation(df)
+        save_cache('processed_data', result)
+        print(f"[OK] Processing complete")
+
+    checkpoint2_elapsed = time.time() - checkpoint2_start
+    print(f"[CHECKPOINT 2] Completed in {checkpoint2_elapsed:.1f}s")
+
+    # Final checkpoint
+    total_elapsed = time.time() - task_start
+    print("\n" + "=" * 60)
+    print(f"[TASK COMPLETE] Finished in {total_elapsed:.1f}s / {TOTAL_TIME_LIMIT}s")
+    if total_elapsed > TOTAL_TIME_LIMIT * 0.8:
+        print(f"[WARNING] Used {total_elapsed/TOTAL_TIME_LIMIT*100:.0f}% of time budget!")
+    print("=" * 60)
+
+    return result
+
+# Example of expensive computation with progress tracking
+def expensive_computation(df):
+    # Perform expensive computation with progress tracking
+    steps = 5
+    for step in range(steps):
+        step_start = time.time()
+        print(f"  [STEP {step+1}/{steps}] Processing...")
+
+        # Do work here
+        time.sleep(0.1)  # Simulate work
+
+        step_elapsed = time.time() - step_start
+        print(f"  [STEP {step+1}/{steps}] Completed in {step_elapsed:.1f}s")
+
+        # Check total time
+        if time.time() - df_load_start > 250:  # 250 seconds
+            print(f"  [WARNING] Near timeout, using simplified approach")
+            # Use simplified approach to finish quickly
+            break
+
+    return df
+```
+
+**CRITICAL CACHING RULES**:
+1. **ALWAYS** cache expensive intermediate results (data loading, processing, modeling)
+2. **USE** `load_cache()` before expensive operations
+3. **SAVE** results with `save_cache()` after successful computation
+4. **CHECK** cache existence first to avoid redundant computation
+5. **CLEAR** cache if data structure changes (delete `cache/` directory)
+
+**CRITICAL MONITORING RULES**:
+1. **PRINT** time at every major step (data loading, processing, modeling)
+2. **WARN** if any step takes > 60 seconds
+3. **ABORT** if approaching 250 seconds total (leave 50s buffer for save/return)
+4. **SAMPLE** large datasets (>10,000 rows) before complex operations
+5. **SIMPLIFY** operations if running out of time (use simpler model, less iterations, etc.)
+
+**TIME BUDGET ALLOCATION** (for 300 second limit):
+- Data loading: 30s max (use cache!)
+- Data preprocessing: 60s max
+- Model training: 120s max
+- Results computation: 60s max
+- Saving results: 30s max
+- Buffer: Unknown/edge cases: 30s
+
+**IF YOU RUN OUT OF TIME**:
+1. Use smaller sample (reduce from 10,000 to 1,000 rows)
+2. Use simpler model (linear instead of complex)
+3. Reduce iterations (100 instead of 1000)
+4. Skip optional features (visualizations, detailed reports)
+
+---
+
+## CRITICAL: Common Errors to AVOID:
+1. **CSV Encoding - MANDATORY**: ALWAYS use `pd.read_csv('filename.csv', encoding='latin-1')` as FIRST choice. These datasets have known encoding issues with UTF-8. Do NOT try UTF-8 first - go directly to latin-1 to avoid crashes.
+2. **Mixed Data Types - MANDATORY**: DataFrames contain BOTH numeric AND string columns. NEVER apply sklearn operations to the entire DataFrame. ALWAYS select numeric columns first:
+   ```python
+   # WRONG - Will crash on string columns
+   scaled_df = scaler.fit_transform(df)
+
+   # CORRECT - Only numeric columns
+   numeric_cols = df.select_dtypes(include=[np.number]).columns
+   numeric_df = df[numeric_cols]
+   scaled_df = scaler.fit_transform(numeric_df)
+   ```
+3. **File Paths**: Data files are in the CURRENT directory (where code runs). Use just the filename like `'summerOly_athletes.csv'`, NOT paths like `'data/summerOly_athletes.csv'`.
+4. **Sklearn Imports**: Do NOT use `from sklearn.linear_model import GeneralizedLinearModel` - it doesn't exist! Use `PoissonRegressor` or `GammaRegressor` instead.
+
+5. **CRITICAL: Data Loading & Column Standardization - MANDATORY**:
+   **PROBLEM**: Raw CSV files may have:
+   - Column names with spaces (e.g., "Year ", " Gold ")
+   - Inconsistent casing (e.g., "year" vs "Year" vs "YEAR")
+   - Special characters or encoding issues
+   - Different actual names than expected (e.g., "Edition" instead of "Year")
+
+   **SOLUTION - MANDATORY FIRST STEPS**:
+   ```python
+   # Step 1: Load data with CORRECT encoding
+   import pandas as pd
+   import os
+
+   # CRITICAL: Always use absolute path for data file
+   data_file = os.path.abspath('{data_file}')
+   print(f"Loading data from: {{data_file}}")
+
+   # ⚠️ MANDATORY: ALWAYS use encoding='utf-8-sig' to handle BOM (Byte Order Mark)
+   # This removes ï»¿ or Ø»¿ prefixes from column names
+   # utf-8-sig automatically strips BOM, preventing KeyError on 'ï»¿Year' vs 'Year'
+   # If utf-8-sig fails, fallback to latin-1
+   try:
+       df = pd.read_csv(data_file, encoding='utf-8-sig')
+   except UnicodeDecodeError:
+       df = pd.read_csv(data_file, encoding='latin-1')
+
+   # Step 2: IMMEDIATELY validate data size
+   if df.empty:
+       raise ValueError("DataFrame is EMPTY! Check file path and encoding")
+
+   if len(df) < 10:
+       raise ValueError(f"Data too small for modeling (only {{len(df)}} rows - minimum 10 required)")
+
+   # Step 3: IMMEDIATELY inspect the data
+   print("=" * 60)
+   print("DATA INSPECTION - MANDATORY FIRST STEP")
+   print("=" * 60)
+   print(f"Shape: {{df.shape}}")
+   print(f"Raw columns (before cleaning): {{df.columns.tolist()}}")
+   print("\\nFirst 5 rows:")
+   print(df.head())
+   print("\\nData types:")
+   print(df.dtypes)
+
+   # Step 4: STANDARDIZE column names (CRITICAL!) - Remove BOM artifacts + UPPERCASE
+   # This prevents KeyError from BOM (ï»¿Year), spaces, casing issues, etc.
+   # Remove BOM artifacts that might still exist
+   df.columns = [col.replace('ï»¿', '').replace('Ï»¿', '').replace('\ufeff', '') for col in df.columns]
+   df.columns = df.columns.str.strip()  # Remove leading/trailing spaces
+   df.columns = df.columns.str.replace(' ', '_')  # Replace spaces with underscores
+   df.columns = df.columns.str.upper()  # Convert to UPPERCASE for consistency (YEAR, NOC, etc.)
+
+   print(f"\\nCleaned columns (standardized): {{df.columns.tolist()}}")
+   print("=" * 60)
+
+   # Step 5: Use fuzzy matching instead of hardcoded names
+   # DON'T use: df['Year']  # May fail if column is 'year', 'Year ', or 'edition'
+   # INSTEAD use (after UPPERCASE standardization):
+   target_col = 'YEAR'  # What you're looking for (UPPERCASE!)
+   matching_cols = [col for col in df.columns if target_col in col.upper()]
+
+   if matching_cols:
+       actual_col = matching_cols[0]
+       print(f"Found column '{{target_col}}' as '{{actual_col}}'")
+       # Use actual_col in your code
+   else:
+       print(f"WARNING: No column matching '{{target_col}}' found!")
+       print(f"Available columns: {{df.columns.tolist()}}")
+       # Use alternative approach or skip
+   ```
+
+   **WHY THIS MATTERS**:
+   - Raw data: ` Year ` (with spaces) → After cleaning: `YEAR` (UPPERCASE!)
+   - All columns are now UPPERCASE: YEAR, NOC, EDITION, GOLD, etc.
+   - Hardcoded `df['Year']` or `df['year']` will fail - use `df['YEAR']` instead
+   - Using `.filter(like='YEAR')` is safer than direct access
+   - **ALWAYS** check `df.head()` before doing any analysis
+
+6. **Column Validation - MANDATORY**: ALWAYS check if columns exist BEFORE accessing them. Use this exact pattern:
+   ```python
+   print("Columns:", df.columns.tolist())
+   if 'ColumnName' in df.columns:
+       # Use the column
+   else:
+       print(f"WARNING: Column 'ColumnName' not found - skipping this operation")
+   ```
+   NEVER access columns without this check - your code WILL crash.
+
+7. **CRITICAL: Variable-Column Alignment - MANDATORY**:
+   **Problem**: The modeling formulas above MAY reference variables that don't exist in the actual dataset (e.g., 'Scenario', 'Performance_Metric', etc.).
+   **Solution**: You MUST validate EVERY variable from modeling formulas BEFORE using it:
+
+   ```python
+   # Step 1: Print available columns
+   print("Available columns:", df.columns.tolist())
+
+   # Step 2: Validate variables from modeling formulas
+   modeling_variables = ['variable1', 'variable2', ...]  # EXTRACT from formulas above
+   available_columns = df.columns.tolist()
+
+   # Step 3: Check which variables exist
+   missing_vars = []
+   for var in modeling_variables:
+       if var not in available_columns:
+           missing_vars.append(var)
+           print(f"ERROR: Variable '{{var}}' from modeling formulas NOT FOUND in dataset!")
+
+   # Step 4: Handle missing variables
+   if missing_vars:
+       print(f"CRITICAL ERROR: The following variables from modeling formulas don't exist: {{missing_vars}}")
+       print(f"Available columns are: {{available_columns}}")
+       print(f"SOLUTION: You MUST either:")
+       print(f"  1. Use ONLY available columns from: {{available_columns}}")
+       print(f"  2. CREATE missing columns from existing ones (e.g., df['Total'] = df['Gold'] + df['Silver'])")
+       print(f"  3. SKIP the operation that requires missing variables")
+       raise ValueError(f"Cannot proceed: Missing variables {{missing_vars}}")
+
+   # Step 5: Only proceed if ALL required variables exist
+   required_vars = ['var1', 'var2']  # Variables needed for YOUR specific task
+   missing_required = [v for v in required_vars if v not in available_columns]
+   if missing_required:
+       print(f"Cannot complete task: Missing required columns: {{missing_required}}")
+       print(f"Please use alternative approach with available columns: {{available_columns}}")
+       # Return early or use alternative logic
+       return None
+   ```
+
+   **CRITICAL REMINDER**:
+   - NEVER assume variables from modeling formulas exist in the dataset
+   - ALWAYS validate variable existence BEFORE using them
+
+8. **P1-1 CRITICAL: Athletes Dataset Structure - ATHLETES TABLE HAS NO GOLD/SILVER/BRONZE COLUMNS!**
+
+   **FATAL ERROR**: Many models assume athletes table has medal count columns like `GOLD`, `SILVER`, `BRONZE`. **THIS IS WRONG!**
+
+   **ACTUAL STRUCTURE**:
+   ```text
+   athletes.csv (individual records):
+   Columns: NAME, SEX, TEAM, NOC, YEAR, CITY, SPORT, EVENT, MEDAL
+   - MEDAL column contains VALUES: 'Gold', 'Silver', 'Bronze' (one per row)
+   - Each row = ONE athlete's participation in ONE event
+   - NO GOLD/SILVER/BRONZE columns - only MEDAL column!
+
+   medal_counts.csv (aggregated statistics):
+   Columns: RANK, NOC, GOLD, SILVER, BRONZE, TOTAL, YEAR
+   - Has GOLD, SILVER, BRONZE as COLUMNS (already aggregated)
+   - Each row = ONE country's medal count for ONE year
+   ```
+
+   **HOW TO CREATE MEDAL COLUMNS FROM ATHLETES TABLE**:
+   ```python
+   # ❌ WRONG - These columns DON'T EXIST in athletes table!
+   # athletes_df['TOTAL_MEDALS'] = athletes_df['GOLD'] + athletes_df['SILVER']  # CRASH!
+
+   # ✅ CORRECT - Create medal columns by pivoting MEDAL column
+   # Step 1: Group by NOC and YEAR, count each medal type
+   medal_counts = athletes_df.groupby(['NOC', 'YEAR'])['MEDAL'].value_counts().unstack(fill_value=0)
+
+   # Step 2: Rename columns (handle missing medal types)
+   # After pivot, columns will be like 'Gold', 'Silver', 'Bronze' (exact values from MEDAL)
+   medal_counts.columns = ['GOLD', 'SILVER', 'BRONZE']  # Ensure consistent naming
+
+   # Step 3: Add TOTAL column
+   medal_counts['TOTAL'] = medal_counts['GOLD'] + medal_counts['SILVER'] + medal_counts['BRONZE']
+
+   # Step 4: Reset index to make NOC and YEAR regular columns
+   medal_counts = medal_counts.reset_index()
+
+   # Step 5: Now you can use these columns
+   print(medal_counts.head())
+   #    NOC  YEAR  GOLD  SILVER  BRONZE  TOTAL
+   #   USA  2024    40      30      20     90
+   #  CHN  2024    30      25      15     70
+   ```
+
+   **ALTERNATIVE: Pivot table approach (more explicit)**:
+   ```python
+   # Create pivot table of medal counts
+   medal_pivot = athletes_df.pivot_table(
+       index=['NOC', 'YEAR'],
+       columns='MEDAL',
+       values='NAME',  # Count athlete names
+       aggfunc='count',
+       fill_value=0
+   )
+
+   # Flatten column names
+   medal_pivot.columns = [f"{col}" for col in medal_pivot.columns]
+   medal_pivot = medal_pivot.reset_index()
+
+   # Ensure all medal types exist (some years may not have all types)
+   for medal_type in ['Gold', 'Silver', 'Bronze']:
+       if medal_type not in medal_pivot.columns:
+           medal_pivot[medal_type] = 0
+
+   # Rename to UPPERCASE for consistency
+   medal_pivot.rename(columns={
+       'Gold': 'GOLD',
+       'Silver': 'SILVER',
+       'Bronze': 'BRONZE'
+   }, inplace=True)
+
+   # Calculate TOTAL
+   medal_pivot['TOTAL'] = medal_pivot['GOLD'] + medal_pivot['SILVER'] + medal_pivot['BRONZE']
+   ```
+
+   **CRITICAL RULES**:
+   - ❌ **NEVER** directly access `athletes_df['GOLD']` - it doesn't exist!
+   - ✅ **ALWAYS** create medal columns by grouping/pivoting the MEDAL column
+   - ✅ **ALWAYS** check if MEDAL column exists first: `if 'MEDAL' in athletes_df.columns:`
+   - ✅ **ALWAYS** handle missing medal types (some years may have no Bronze medals, etc.)
+   - ✅ **USE** `medal_counts.csv` if it exists (already has aggregated medal counts)
+
+   **IF YOU NEED MEDAL STATISTICS**:
+   - Option 1: Use `clean_medal_counts.csv` if available (already aggregated)
+   - Option 2: Create from `clean_athletes.csv` using the pivot method above
+   - NEVER assume medal count columns exist in athletes table!
+
+9. **P1-2 CRITICAL: Hosts Table Merge Keys - HOSTS HAS NO NOC COLUMN!**
+
+   **FATAL ERROR**: Many models try to merge athletes with hosts using NOC as key. **THIS IS WRONG!**
+
+   **ACTUAL STRUCTURE**:
+   ```text
+   hosts.csv (host cities information):
+   Columns: YEAR, HOST (city name)
+   - Has YEAR and HOST columns
+   - NO NOC column - country code is NOT in this table!
+   - Each row = ONE Olympic edition (year + host city)
+
+   athletes.csv (individual records):
+   Columns: NAME, SEX, TEAM, NOC, YEAR, CITY, SPORT, EVENT, MEDAL
+   - Has NOC column (country code)
+   - Has YEAR column
+   - Has CITY column (host city)
+   ```
+
+   **WRONG APPROACH**:
+   ```python
+   # ❌ WRONG - hosts has NO NOC column!
+   merged = pd.merge(athletes_df, hosts_df, on='NOC')  # CRASH: KeyError: 'NOC'
+   merged = pd.merge(athletes_df, hosts_df, on=['NOC', 'YEAR'])  # CRASH!
+   ```
+
+   **CORRECT APPROACH**:
+   ```python
+   # ✅ CORRECT - Use YEAR to merge (common column)
+   merged = pd.merge(athletes_df, hosts_df, on='YEAR', how='left')
+
+   # ✅ ALTERNATIVE - Use CITY if available
+   merged = pd.merge(athletes_df, hosts_df, on=['YEAR', 'CITY'], how='left')
+
+   # ✅ ANOTHER OPTION - Merge after getting country info
+   # Step 1: Load hosts with year and city
+   hosts = pd.read_csv('clean_hosts.csv', encoding='utf-8-sig')
+   hosts['YEAR'] = hosts['YEAR'].astype(str)  # Ensure same type
+
+   # Step 2: Load athletes
+   athletes = pd.read_csv('clean_athletes.csv', encoding='utf-8-sig')
+   athletes['YEAR'] = athletes['YEAR'].astype(str)
+
+   # Step 3: Merge on YEAR (hosts provides CITY for each year)
+   merged = pd.merge(athletes, hosts, on='YEAR', how='left')
+
+   # Step 4: Now you have both athlete data and host city
+   print(merged[['NAME', 'NOC', 'YEAR', 'HOST']].head())
+   ```
+
+   **CRITICAL RULES**:
+   - ❌ **NEVER** merge hosts on NOC - this column doesn't exist in hosts table!
+   - ✅ **ALWAYS** merge on YEAR (the common column)
+   - ✅ **CHECK** column existence before merging: `if 'NOC' in hosts_df.columns:`
+   - ✅ **USE** `how='left'` to preserve all athlete records
+   - ✅ **VERIFY** merge keys exist in both DataFrames first
+
+   **IF YOU NEED COUNTRY-HOST MAPPING**:
+   - hosts table only provides: YEAR → HOST city
+   - athletes table provides: NOC (country) for each athlete
+   - To get country → host mapping, you need to aggregate athletes by NOC and YEAR first
+   - Or use a separate country-to-NOC mapping table if available
+
+10. **P1-3 CRITICAL: Column Name Standardization - MANDATORY FIRST STEP!**
+
+   This is ALREADY covered in point #5 above, but to repeat:
+   - **ALWAYS** use `encoding='utf-8-sig'` to handle BOM (removes ï»¿ prefixes)
+   - **ALWAYS** standardize columns: `.str.strip().str.upper()` after loading
+   - **ALWAYS** check `df.columns.tolist()` before accessing columns
+   - **NEVER** assume exact column names like 'Year' - use 'YEAR' after standardization
+
+11. **P1-4 CRITICAL: Safe Column Operations - Prevent KeyError!**
+
+   **PROBLEM**: Operations like `get_dummies()` or `drop()` fail if columns don't exist.
+
+   **WRONG APPROACH**:
+   ```python
+   # ❌ WRONG - Crashes if SPORT doesn't exist
+   df_dummies = pd.get_dummies(df, columns=['SPORT', 'EVENT', 'TEAM'])
+
+   # ❌ WRONG - Crashes if column doesn't exist
+   df.drop(['SPORT', 'HOST'], axis=1, inplace=True)
+   ```
+
+   **CORRECT APPROACH**:
+   ```python
+   # ✅ CORRECT - Only process columns that exist
+   columns_to_encode = ['SPORT', 'EVENT', 'TEAM']
+   existing_columns = [col for col in columns_to_encode if col in df.columns]
+
+   if existing_columns:
+       df_dummies = pd.get_dummies(df, columns=existing_columns)
+       print(f"[OK] Encoded columns: {existing_columns}")
+   else:
+       print("[WARN] No columns to encode found")
+       df_dummies = df  # Use original if nothing to encode
+
+   # ✅ CORRECT - Use errors='ignore' for drop
+   columns_to_drop = ['SPORT', 'HOST']
+   df.drop(columns_to_drop, axis=1, errors='ignore', inplace=True)
+   # errors='ignore' means: ignore columns that don't exist instead of crashing
+
+   # ✅ ALTERNATIVE - Check before dropping
+   for col in columns_to_drop:
+       if col in df.columns:
+           df.drop(col, axis=1, inplace=True)
+           print(f"[OK] Dropped column: {col}")
+       else:
+           print(f"[WARN] Column not found, skipping: {col}")
+   ```
+
+   **CRITICAL RULES**:
+   - ❌ **NEVER** call `get_dummies()` without checking columns exist
+   - ❌ **NEVER** call `drop()` without `errors='ignore'` or existence check
+   - ✅ **ALWAYS** filter to existing columns: `[col for col in wanted if col in df.columns]`
+   - ✅ **ALWAYS** use `errors='ignore'` in `drop()` to prevent KeyError
+   - ✅ **CHECK** `df.columns.tolist()` before any column operations
+
+12. **Available Modules**: You CAN use: pandas, numpy, matplotlib, seaborn, sklearn (standard modules only), scipy, statsmodels. Do NOT use modules that don't exist.
+9. **CRITICAL - Code Structure**: The code template contains a function `def task1():` with `return` at the end. You MUST write ALL your code INSIDE this function. NEVER:
+   - Use `return` statements outside of functions (SyntaxError)
+   - Write code after the `if __name__ == '__main__':` block
+   - Add new functions unless absolutely necessary
+   Your code should fill in the body of task1() between the `# ...` comment and the `return` statement.
+
+{user_prompt}
+
+## CRITICAL REMINDER - ACTUAL DATA COLUMNS:
+**IF the "Available Data Files and Columns" section above appears, you MUST use ONLY those column names!**
+- DO NOT guess or invent column names like 'Year', 'Gold', 'NOC', etc.
+- ALWAYS check column existence with: `if 'ColumnName' in df.columns:`
+- ALWAYS print columns first: `print("Available columns:", df.columns.tolist())`
+- IF you use non-existent columns, your code WILL crash with KeyError
+- The list above shows the ACTUAL columns in the CSV files - use ONLY those!
+
+
+## Expected Response Format:
+You **MUST** return the Python implementation in the following format:
+```python
+# Here is the Python code.
+"""
+
+
+TASK_CODING_DEBUG_PROMPT = """\
+# Code Template:
+{code_template}
+
+# Modeling Process:
+{modeling_process}
+
+# Current Code:
+{code}
+
+However, there are some bugs in this version. Here is the execution result:
+# Execution Result:
+{observation}
+
+---
+
+You are a helpful programming expert. Based on the provided execution result, please revise the script to fix these bugs. Your task is to address the error indicated in the result, and refine or modify the code as needed to ensure it works correctly.
+
+## CRITICAL: Mandatory Imports & Environment Setup (DO NOT SKIP!)
+
+**Your code MUST start with these exact imports at the very top:**
+```python
+import sys
+import io
+import os
+import pandas as pd
+import numpy as np
+
+# CRITICAL: Force UTF-8 output to prevent UnicodeEncodeError on Windows
+# This fixes the 'gbk codec can't encode character' crash
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+```
+
+**WARNING**: When debugging, NEVER remove these imports! Common mistakes:
+- ❌ Removing `import os` when fixing other issues → causes NameError
+- ❌ Forgetting to add `import io` when using UTF-8 fix → causes NameError
+- ✅ ALWAYS preserve these imports, even when restructuring code
+
+## CRITICAL: Console Output Safety (Prevent Crashes!)
+
+**DO NOT print large data structures directly to console!**
+
+❌ **WRONG** (Will crash with UnicodeEncodeError):
+```python
+print(country_medals)  # Crashes if data contains special characters
+```
+
+✅ **CORRECT** (Safe alternatives):
+```python
+# Print summary only
+print(f"Shape: {{country_medals.shape}}")
+print(f"Columns: {{country_medals.columns.tolist()}}")
+# Or save to file
+country_medals.to_csv('output.csv', index=False, encoding='utf-8')
+```
+
+## CRITICAL: Common Errors to AVOID:
+1. **CSV Encoding - MANDATORY**: ALWAYS use `pd.read_csv('filename.csv', encoding='latin-1')` as FIRST choice. These datasets have known encoding issues with UTF-8. Do NOT try UTF-8 first - go directly to latin-1 to avoid crashes.
+2. **Mixed Data Types - MANDATORY**: DataFrames contain BOTH numeric AND string columns. NEVER apply sklearn operations to the entire DataFrame. ALWAYS select numeric columns first:
+   ```python
+   # WRONG - Will crash on string columns
+   scaled_df = scaler.fit_transform(df)
+
+   # CORRECT - Only numeric columns
+   numeric_cols = df.select_dtypes(include=[np.number]).columns
+   numeric_df = df[numeric_cols]
+   scaled_df = scaler.fit_transform(numeric_df)
+   ```
+3. **File Paths**: Data files are in the CURRENT directory. Use just the filename.
+4. **Column Validation - MANDATORY**: ALWAYS check if columns exist BEFORE accessing them. Use this exact pattern:
+   ```python
+   print("Columns:", df.columns.tolist())
+   if 'ColumnName' in df.columns:
+       # Use the column
+   else:
+       print(f"WARNING: Column 'ColumnName' not found - skipping this operation")
+   ```
+   NEVER access columns without this check - your code WILL crash.
+5. **Index Errors**: When accessing list elements by index, ALWAYS check `len(list) > index` first.
+6. **CRITICAL - Code Structure**: The code template contains a function `def task1():` with `return` at the end. You MUST write ALL your code INSIDE this function. NEVER:
+   - Use `return` statements outside of functions (SyntaxError)
+   - Write code after the `if __name__ == '__main__':` block
+   - Add new functions unless absolutely necessary
+   Your code should fill in the body of task1() between the `# ...` comment and the `return` statement.
+
+## CRITICAL: Context Preservation Rules:
+1. **NEVER Remove Valid Imports**: If the previous code has import statements (e.g., `import pandas as pd`, `import numpy as np`), you MUST keep them. Do NOT remove import statements that were working correctly.
+2. **Build on Working Code**: Only modify the parts that are causing errors. Keep the parts that were working.
+3. **Preserve Function Structure**: Keep the existing function definitions and their structure.
+
+## CRITICAL: Error Pattern Recognition:
+- If you see the SAME error occurring multiple times (e.g., "KeyError: 'Year'" appears repeatedly), DO NOT keep trying the same approach.
+- When a error repeats, try a DIFFERENT method:
+  - For KeyError: Check if the column exists first, use alternative columns, or simplify the analysis
+  - For NameError: Ensure all imports are present, check variable names
+  - For TypeError: Verify data types before operations, use type conversion
+  - For ValueError: Validate input data, handle edge cases
+- Example: If `df['Year']` fails with KeyError 3 times, try `df.iloc[:, 0]` or `df.select_dtypes(include=[np.number])` instead
+
+{user_prompt}
+Please respond exactly in the following format:
+```python
+# Provide the corrected python code here.
+```
+"""
+
+
+TASK_RESULT_PROMPT = """\
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{task_formulas}
+
+# Task Modeling:
+{task_modeling}
+
+---
+
+Based on the task description, analysis, and modeling framework, present a comprehensive and detailed account of the intermediate results, calculations, and outcomes generated during the task. Clearly articulate the results of any simulations, experiments, or calculations, providing numerical values, data trends, or statistical measures as necessary. If visual representations such as graphs, charts, or tables were used to communicate the results, ensure they are clearly labeled and explained, highlighting their relevance to the overall task. Discuss the intermediate steps or processes that led to the results, including any transformations or assumptions made during calculations. If applicable, compare and contrast these results with expected outcomes or previously known results to gauge the task's success. Provide a thoughtful interpretation of the findings, considering how they contribute to advancing understanding or solving the problem at hand, and highlight any areas where further investigation or refinement may be needed.
+{user_prompt}
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text and LaTeX for formulas only, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+TASK_RESULT_WITH_CODE_PROMPT = """\
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{task_formulas}
+
+# Task Modeling:
+{task_modeling}
+
+# Code Execution Result:
+{execution_result}
+
+---
+
+Based on the task description, analysis, modeling framework, and code execution result, present a comprehensive and detailed account of the intermediate results, calculations, and outcomes generated during the task. Clearly articulate the results of any computations or operations performed, providing numerical values, data trends, or statistical measures as necessary. If visual representations such as graphs, charts, or tables were used to communicate the results, ensure they are clearly labeled and explained, highlighting their relevance to the overall task. Discuss the intermediate steps or processes that led to the results, including any transformations or assumptions made during calculations. If applicable, compare and contrast these results with expected outcomes or previously known results to gauge the task's success. Provide a thoughtful interpretation of the findings, considering how they contribute to advancing understanding or solving the problem at hand, and highlight any areas where further investigation or refinement may be needed.
+{user_prompt}
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text and LaTeX for formulas only, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+
+TASK_ANSWER_PROMPT = """\
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Modeling Formulas:
+{task_formulas}
+
+# Task Modeling:
+{task_modeling}
+
+# Task Result:
+{task_result}
+
+---
+
+Craft a comprehensive and insightful answer section that synthesizes the findings presented in the results section to directly address the research questions and objectives outlined at the outset of the study. Begin by clearly stating the primary conclusions drawn from the analysis, ensuring that each conclusion is explicitly linked to specific aspects of the results. Discuss how these conclusions validate or challenge the initial hypotheses or theoretical expectations, providing a coherent narrative that illustrates the progression from data to insight.
+
+Evaluate the effectiveness and reliability of the mathematical models employed, highlighting strengths such as predictive accuracy, robustness, or computational efficiency. Address any limitations encountered during the modeling process, explaining how they may impact the validity of the conclusions and suggesting potential remedies or alternative approaches. Consider the sensitivity of the model to various parameters and the extent to which the results are generalizable to other contexts or applications.
+
+Analyze potential biases that may have influenced the results, including data bias, model bias, and computational bias. Discuss whether the dataset is representative of the problem space and whether any imbalances, selection biases, or sampling limitations might have affected the conclusions. Examine modeling assumptions, parameter choices, and architectural constraints that could introduce systematic deviations in the results. Assess how numerical precision, algorithmic approximations, or implementation details might influence the stability and fairness of the model's predictions.
+
+Discuss strategies to mitigate identified biases and improve the reliability of the conclusions. Consider adjustments in data preprocessing, such as resampling, normalization, or augmentation, to address distribution imbalances. Explore refinements to the modeling process, including regularization techniques, fairness constraints, and sensitivity analyses, to ensure robustness across different scenarios. Evaluate the impact of alternative modeling approaches and discuss the extent to which the proposed methods can generalize beyond the given dataset or problem context.
+
+Explore the broader implications of the findings for the field of study, identifying how they contribute to existing knowledge, inform future research directions, or influence practical applications. Discuss any unexpected outcomes and their significance, offering interpretations that may reveal new avenues for exploration or theoretical development. Reflect on the societal, economic, or environmental relevance of the results, if applicable, and propose recommendations based on the study's insights.
+
+Conclude the section by summarizing the key takeaways, emphasizing the contribution of the research to solving the problem at hand, and outlining the next steps for further investigation or implementation. Ensure that the discussion is logically structured, with each paragraph building upon the previous ones to form a cohesive and persuasive argument that underscores the study's value and impact.
+
+The content of this Task Answer section should be distinct and not merely a repetition of the Task Result section. Ensure that there is no duplication.
+
+{user_prompt}
+
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text and LaTeX for formulas only, without any Markdown formatting or syntax. Written as one or more cohesive paragraphs. Avoid structuring your answer in bullet points or numbered lists.
+"""
+
+
+CREATE_CHART_PROMPT = """\
+## Instruction
+Create a highly detailed and comprehensive chart that effectively visualizes the complex mathematical relationships and insights presented in the provided mathematical modeling paper. Begin by selecting the most appropriate type of chart--such as a line graph, bar chart, scatter plot, heatmap, or 3D surface plot--based on the nature of the data and the specific relationships being analyzed. Clearly define the variables involved, including their units and scales, and incorporate any derived metrics that enhance interpretability. Ensure that the axes are labeled accurately and descriptively, with appropriate units and scales, whether linear or logarithmic, to best represent the data distribution and relationships. Include a clear and concise legend that distinguishes between different datasets or variables, using distinct colors or patterns that are both aesthetically pleasing and easily distinguishable. Utilize gridlines to aid in the accurate reading of values, and choose a color scheme that enhances readability while maintaining visual appeal.
+
+Emphasize the core purpose of the chart, whether it is to highlight trends over time, compare different values, show distributions, illustrate correlations, validate theoretical models, or support key arguments within the paper. Articulate the intended message of the chart clearly, ensuring that every design choice--from the type of chart to the specific visual elements used--aligns with the objectives of the mathematical modeling paper. Incorporate multiple lines or bars if comparing different datasets, use shading or contouring for density representation, and add error bars to indicate uncertainty where applicable. Include annotations to highlight significant data points, trends, or anomalies that are critical to the analysis, providing context and explanations that guide the viewer's understanding.
+
+Balance aesthetics with functionality by selecting colors and contrasts that not only make the chart visually compelling but also enhance readability and comprehension. Avoid unnecessary complexity by keeping the design clean and focused, ensuring that the chart remains clear and easy to interpret without sacrificing accuracy or depth of information. If beneficial, incorporate supplementary visual aids such as trend lines, regression curves, or overlays of empirical and theoretical results to strengthen the analysis and provide additional layers of insight. The final chart should serve as a precise and compelling visualization that effectively conveys the mathematical insights, facilitates understanding, and robustly supports the overall narrative and conclusions of the mathematical modeling paper.
+
+$user_prompt
+
+## Paper Content
+<paper>  
+$paper_content  
+</paper>  
+
+## Existing Charts
+$existing_charts  
+
+## Create a New Chart
+
+Please create a chart that aligns closely with the above paper content while avoiding redundancy with existing charts. Follow the markdown format below to describe your chart:  
+
+**Chart Title**  
+[Provide a clear and descriptive title for the chart]  
+
+**Chart Type**  
+[Specify the type of chart]  
+
+**Purpose**  
+[Describe the core purpose of the chart in a paragraph]  
+
+**Data or Variables**  
+[Describe the data or variables used in the chart in a paragraph]  
+
+**Chart Presentation Guidelines**  
+[A comprehensive guide on chart presentation, covering data representation, key layout elements, units, axis labels, legends, gridlines, annotations, and other essential considerations for effective visualization.]
+
+**Intended Message**
+[Articulate the key message or insight the chart is intended to convey in a paragraph]
+"""
+
+
+CHART_TO_CODE_PROMPT = r"""\
+You are an expert Python programmer specializing in data visualization using matplotlib and seaborn. Your task is to convert a detailed chart description into executable Python code that generates the chart.
+
+## Chart Description
+
+$chart_description
+
+## Instructions
+
+### P0-2 CRITICAL: Data Loading - USE load_csv() ONLY!
+
+**The system provides a SPECIAL load_csv() function for you. You MUST use it!**
+
+**ABSOLUTELY FORBIDDEN:**
+- ❌ `pd.read_csv(...)` - DO NOT USE! The system handles this for you
+- ❌ `from pathlib import Path` - IMPORT BANNED!
+- ❌ `import os` - IMPORT BANNED!
+- ❌ Any file paths like `C:/Users/...` - PATHS BANNED!
+- ❌ Relative paths like `dataset/file.csv` - PATHS BANNED!
+- ❌ Filenames NOT in the whitelist below - SECURITY VIOLATION!
+
+**MANDATORY - USE THIS PATTERN:**
+```python
+# ✅ CORRECT - Use load_csv() with FILENAME ONLY (no paths!)
+df = load_csv('clean_athletes.csv')  # Filename only, no path!
+print("Available columns:", df.columns.tolist())
+```
+
+2. **Extract variables mentioned in chart description**
+```python
+# If description mentions "Scenarios", "Factors", "Performance", etc.
+# Check if these columns EXIST in the data
+mentioned_vars = ['Scenario', 'Factor', 'Historical_Performance', 'Athlete_Quality']  # Extract from description
+available_cols = df.columns.tolist()
+missing = [v for v in mentioned_vars if v not in available_cols]
+```
+
+3. **Handle missing variables**
+```python
+if missing:
+    print(f"WARNING: Variables from description NOT FOUND: {{missing}}")
+    print(f"Available columns: {{available_cols}}")
+    # Option 1: CREATE from available columns
+    # Option 2: USE alternative approach with available columns
+    # Option 3: SKIP that part of the analysis
+    # NEVER proceed blindly with missing variables!
+```
+
+**CRITICAL EXAMPLES:**
+
+❌ **WRONG - Assuming columns exist from description:**
+```python
+# Chart description mentioned "Scenarios"
+# WRONG: Just assuming df['Scenario'] exists
+df.groupby('Scenario')['Medals'].sum()  # KeyError!
+```
+
+✅ **CORRECT - Validating before using:**
+```python
+# Load data first using load_csv() - NO PATHS!
+df = load_csv('clean_athletes.csv')
+print("Columns:", df.columns.tolist())  # ['YEAR', 'NOC', 'MEDAL', ...]
+
+# Description mentioned "Scenarios" but column doesn't exist
+# CREATE it from available columns
+df['Scenario'] = df['YEAR'].apply(lambda y: 'Early' if y < 2000 else 'Late')
+# NOW we can use it
+df.groupby('Scenario')['MEDAL'].count()
+```
+
+**ENFORCEMENT:**
+- Your code WILL crash if you use non-existent columns
+- You MUST validate EVERY variable from the chart description BEFORE accessing it
+- If a variable doesn't exist, CREATE it from available columns OR change your approach
+
+---
+
+### CRITICAL: Prevent Array Length Mismatch!
+
+**Problem**: Manual list construction often causes `ValueError: All arrays must be of the same length` when different filters create different-sized arrays.
+
+❌ **WRONG - Manual list construction (causes length mismatch):**
+```python
+# DANGER: Different filters may create different lengths!
+x = df[df['YEAR'] > 2000]['YEAR']  # May have 100 rows
+y = df[df['MEDAL'] == 'Gold']['MEDAL']  # May have 50 rows!
+plt.plot(x, y)  # CRASH: ValueError: All arrays must be of the same length
+```
+
+✅ **CORRECT - Use DataFrame operations (guarantees alignment):**
+```python
+# Apply ALL filters to the SAME DataFrame
+df_filtered = df[df['YEAR'] > 2000]  # Single filter operation
+x = df_filtered['YEAR']
+y = df_filtered['MEDAL']  # Same length as x!
+plt.plot(x, y)  # Works perfectly
+```
+
+✅ **ALTERNATIVE - Explicit DataFrame construction with dropna():**
+```python
+# Create explicit DataFrame and drop NaN to ensure alignment
+plot_data = pd.DataFrame({{
+    'YEAR': df[df['YEAR'] > 2000]['YEAR'],
+    'MEDAL': df[df['YEAR'] > 2000]['MEDAL']
+}}).dropna()  # Remove NaN rows to ensure length consistency
+plt.plot(plot_data['YEAR'], plot_data['MEDAL'])
+```
+
+**CRITICAL RULES:**
+1. **NEVER** extract multiple series with different filters - use single filtered DataFrame
+2. **ALWAYS** ensure x and y come from the SAME DataFrame operation
+3. **USE** `dropna()` if manually constructing DataFrames to remove misaligned rows
+4. **VALIDATE** array lengths before plotting: `assert len(x) == len(y), f"Length mismatch: {{len(x)}} vs {{len(y)}}"`
+
+---
+
+### P0-2 CRITICAL: NEVER Use Placeholder Strings or Paths!
+
+**Problem**: LLM sometimes generates placeholder strings or tries to use file paths. Both are FORBIDDEN!
+
+❌ **WRONG - Using placeholder (will crash):**
+```python
+file_path = 'FULL_PATH_TO_DATA_FILE'  # Placeholder - SecurityViolation!
+df = pd.read_csv(file_path)  # WRONG FUNCTION - Use load_csv()!
+```
+
+❌ **WRONG - Using paths (FORBIDDEN!):**
+```python
+df = pd.read_csv(r'C:/Users/.../file.csv')  # PATHS BANNED!
+df = pd.read_csv('dataset/file.csv')  # RELATIVE PATHS BANNED!
+```
+
+✅ **CORRECT - Using load_csv() with filename only:**
+```python
+# Use ONLY the filename - NO PATHS!
+df = load_csv('clean_athletes.csv')
+```
+
+**CRITICAL RULES:**
+1. **ALWAYS** use `load_csv('filename.csv')` - NEVER `pd.read_csv()`
+2. **NEVER** use file paths (absolute or relative) - ONLY filenames
+3. **NEVER** use placeholder strings like 'FULL_PATH_TO_'
+4. **ONLY** use filenames listed in the "Available Data Files" above
+5. **The load_csv() function is pre-defined - DO NOT import or define it!**
+
+---
+
+**CRITICAL SECURITY REQUIREMENT - DO NOT INCLUDE IMPORT STATEMENTS:**
+
+The code execution environment has ALREADY imported the following modules for you:
+- `plt` (matplotlib.pyplot)
+- `pd` (pandas)
+- `np` (numpy)
+- `Path` (pathlib.Path)
+
+**YOU MUST NOT include any import statements in your code.** Your code will be rejected by security validation if it contains:
+- `import matplotlib.pyplot as plt`
+- `import pandas as pd`
+- `import numpy as np`
+- `from pathlib import Path`
+- Any other import statements
+
+Simply use these modules directly in your code without importing them.
+
+---
+
+### CRITICAL: FORBIDDEN CODE PATTERNS (DO NOT USE!)
+
+**These patterns will cause your code to CRASH. DO NOT use them!**
+
+**FORBIDDEN #1: Using Path() for data loading - SECURITY ERROR!**
+```python
+# WRONG - Path() is ONLY for save_path, NOT for loading data!
+from pathlib import Path  # DO NOT IMPORT!
+data_path = Path('clean_athletes.csv')  # WRONG! Use load_csv()!
+df = pd.read_csv(data_path)  # WRONG! Use load_csv()!
+
+# CORRECT - Use load_csv() with filename only
+df = load_csv('clean_athletes.csv')  # OK!
+
+# Path() is ONLY allowed for save_path manipulation (already provided)
+Path(save_path).parent.mkdir(parents=True, exist_ok=True)  # OK!
+```
+
+**FORBIDDEN #2: Importing pathlib or other modules - SECURITY ERROR!**
+```python
+# WRONG - SecurityViolation: Import not allowed
+from pathlib import Path  # DO NOT IMPORT!
+import pandas as pd  # DO NOT IMPORT!
+from matplotlib import pyplot as plt  # DO NOT IMPORT!
+import os  # DO NOT IMPORT!
+
+# CORRECT - Use objects directly (already available)
+df = load_csv('clean_athletes.csv')  # load_csv() is available
+plt.plot(...)  # plt is already available
+# Path is available but ONLY for save_path manipulation, not for loading data!
+```
+
+**FORBIDDEN #3: DataFrame.name attribute - AttributeError!**
+```python
+# WRONG - DataFrame has no 'name' attribute
+series_name = df.name  # CRASH: AttributeError!
+
+# CORRECT - Use different approach
+# DataFrames don't have .name attribute
+# Series have .name, but DataFrames don't
+print(df.columns.tolist())  # Use this instead
+```
+
+**FORBIDDEN #4: Placeholder strings or paths - SecurityViolation!**
+```python
+# WRONG - Using placeholder or paths will crash
+df = pd.read_csv('FULL_PATH_TO_DATA_FILE')  # CRASH! Use load_csv()!
+df = load_csv(r'C:/Users/.../file.csv')  # CRASH! No paths allowed!
+df = load_csv('dataset/file.csv')  # CRASH! Relative paths banned!
+
+# CORRECT - Use only filename from whitelist
+df = load_csv('clean_athletes.csv')  # OK! Filename only
+```
+
+**CRITICAL ENFORCEMENT:**
+- ANY use of Path() inside f-string → **IMMEDIATE SYNTAX ERROR**
+- ANY import statement → **SECURITY VIOLATION ERROR**
+- ANY placeholder like 'FULL_PATH_TO_' → **FILE NOT FOUND ERROR**
+- ANY df.name usage → **ATTRIBUTE ERROR**
+
+**If you violate these rules, your code WILL crash immediately!**
+
+---
+
+Convert the above chart description into a complete, executable Python script using matplotlib. Follow these requirements:
+
+### CRITICAL Format Requirements:
+
+1. **Your response must be ONLY a Python code block starting with** ```python
+2. **Do NOT include any explanations, markdown headers, or text outside the code block**
+3. **The code MUST save the figure to** `save_path` **variable**
+
+### Data Loading (P0-2 CRITICAL - USE load_csv() ONLY!):
+
+**ABSOLUTELY FORBIDDEN:**
+- ❌ `pd.read_csv()` - DO NOT USE!
+- ❌ Any file paths (absolute or relative) - PATHS BANNED!
+- ❌ Filenames NOT in the whitelist above
+- ❌ Synthetic data generation (`np.random`, `np.linspace`)
+
+**MANDATORY - USE THIS EXACT PATTERN:**
+```python
+# ✅ CORRECT - Use load_csv() with FILENAME ONLY
+df = load_csv('clean_athletes.csv')  # Filename only, no path!
+print(f"Loaded {{len(df)}} rows")
+print(f"Columns: {df.columns.tolist()}")
+```
+
+**CRITICAL RULES:**
+1. **ONLY** use `load_csv('filename.csv')` - the system provides this function
+2. **NEVER** use `pd.read_csv()` - the system handles CSV loading for you
+3. **NEVER** use file paths - only filenames from the whitelist above
+4. **NEVER** generate synthetic data - use real data from CSV files
+5. **ALWAYS** validate the DataFrame is not empty before using it
+6. **DO NOT** import any modules - they're already available
+7. **CHECK** that columns exist before accessing them (prevents KeyError)
+
+**MANDATORY DATA VALIDATION - COPY THIS EXACTLY:**
+```python
+# CRITICAL STEP 1: Load data with CORRECT encoding
+import pandas as pd
+import os
+
+# ⚠️ P1-7 GUARD: DO NOT COPY 'FULL_PATH_FROM_LIST' LITERALLY!
+# You MUST replace it with the ACTUAL file path from the "Available Data Files" list above
+# CRITICAL: Use raw string (r'path') for Windows paths to avoid escape sequence errors
+# OR use forward slashes (they work on Windows too!)
+file_path = r'FULL_PATH_FROM_LIST'  # ⚠️ REPLACE THIS PLACEHOLDER WITH ACTUAL PATH!
+df = pd.read_csv(file_path, encoding='latin-1')
+
+# CRITICAL STEP 2: IMMEDIATELY check if data loaded successfully
+print("=" * 60)
+print("DATA VALIDATION - MANDATORY")
+print("=" * 60)
+print(f"File: {{file_path}}")
+print(f"Shape: {{df.shape}}")
+
+# CRITICAL CHECK: Is DataFrame empty?
+if df.empty:
+    print("ERROR: DataFrame is EMPTY! File may not exist or encoding failed!")
+    print("SOLUTION: Check file path and encoding")
+    raise ValueError("Cannot create chart from empty DataFrame")
+
+print(f"Raw columns: {{df.columns.tolist()}}")
+print(f"First 3 rows:\\n{{df.head(3)}}")
+print("=" * 60)
+
+# CRITICAL STEP 3: Standardize column names to UPPERCASE
+df.columns = df.columns.str.strip().str.upper()
+print(f"Standardized columns (UPPERCASE): {{df.columns.tolist()}}")
+
+# CRITICAL STEP 4: Validate columns exist BEFORE using
+required_cols = ['COLUMN1', 'COLUMN2']  # Replace with UPPERCASE names
+missing = [c for c in required_cols if c not in df.columns]
+if missing:
+    print(f"ERROR: Missing columns: {{missing}}")
+    print(f"Available: {{df.columns.tolist()}}")
+    # Use fuzzy matching or create columns
+```
+
+**Example - CORRECT approach:**
+```python
+# CORRECT: Load real data with proper encoding
+df = pd.read_csv('C:/Users/.../task1_olympic_features.csv', encoding='latin-1')
+
+# CRITICAL: Check data loaded
+if df.empty:
+    raise ValueError("No data loaded!")
+
+if len(df) < 10:
+    raise ValueError(f"Data too small for analysis (only {{len(df)}} rows)")
+
+print(f"Loaded {{len(df)}} rows")
+print(f"Columns: {{df.columns.tolist()}}")
+
+# Standardize column names to UPPERCASE
+df.columns = df.columns.str.strip().str.upper()
+
+# NOW use the columns (all UPPERCASE!)
+x = df['YEAR']  # After standardization to UPPERCASE
+y = df['TOTAL_MEDALS']
+```
+
+**Example - CORRECT approach:**
+```python
+# CORRECT: Load real data with proper encoding
+df = pd.read_csv('C:/Users/.../task1_olympic_features.csv', encoding='latin1')
+print(f"Loaded {{len(df)}} rows")
+
+# Use real columns from the data
+x = df['Year']
+y = df['Total_Medals']
+
+# Group real data
+grouped = df.groupby('NOC')['Gold'].mean()
+```
+
+**Example - WRONG approach (DO NOT DO THIS):**
+```python
+# WRONG: Generating synthetic data
+np.random.seed(42)
+x = np.linspace(2000, 2024, 100)  # Fake years
+y = np.random.randn(100)  # Fake values
+```
+
+**Only generate synthetic data if:**
+- No CSV files are provided in the "Available Data Files" list
+- The chart description explicitly mentions theoretical/idealized data
+- You cannot find ANY relevant columns in ANY of the CSV files
+
+### Code Structure:
+
+```python
+# CRITICAL: Do NOT include import statements!
+# plt, pd, np, Path are already available in the execution environment
+# Your code should use these modules directly without importing them
+
+# Set style for publication-quality figures
+try:
+    plt.style.use('seaborn-v0_8-whitegrid')
+except:
+    plt.style.use('seaborn-whitegrid')
+plt.rcParams['figure.dpi'] = 300
+plt.rcParams['savefig.dpi'] = 300
+plt.rcParams['font.size'] = 10
+
+# Create figure and axis
+fig, ax = plt.subplots(figsize=(10, 6))
+
+# LOAD DATA FROM CSV (if files are available)
+# df = pd.read_csv('FULL_PATH_TO_FILE')
+
+# YOUR PLOTTING CODE HERE
+# Based on the chart description and loaded data, implement:
+# - Data loading and preprocessing
+# - Plot type (line, bar, scatter, heatmap, etc.)
+# - Colors, markers, line styles
+# - Axes labels with units
+# - Legend
+# - Gridlines
+# - Annotations
+
+# Labels and title
+ax.set_xlabel('X-Axis Label', fontsize=12)
+ax.set_ylabel('Y-Axis Label', fontsize=12)
+ax.set_title('Chart Title', fontsize=14, fontweight='bold')
+
+# Legend
+ax.legend(loc='best', framealpha=0.9)
+
+# Grid
+ax.grid(True, alpha=0.3, linestyle='--')
+
+# Save figure
+Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+plt.savefig(save_path, bbox_inches='tight', dpi=300)
+plt.close()
+
+print(f"Chart saved to: {{save_path}}")
+```
+
+### Implementation Guidelines:
+
+1. **PRIORITY 1**: Load and use data from CSV files if provided
+2. **Colors**: Use exact color specifications from description (hex codes or names)
+3. **Data Processing**:
+   - Check column names with `df.columns`
+   - Handle missing values with `df.dropna()` or `df.fillna()`
+   - Group/aggregate data with `df.groupby()`
+   - Convert date strings with `pd.to_datetime()`
+4. **Axes**: Use exact labels, limits, and scales (log/linear) from description
+5. **Annotations**: Add all specified annotations with arrowprops
+6. **Error bars**: Include if described using plt.errorbar()
+7. **Multiple series**: Use loops or separate plot commands for each series
+8. **Layout**: Use tight_layout() or bbox_inches='tight' to prevent label cutoff
+
+### Common Chart Types with Real Data:
+
+**Line Chart from CSV:**
+```python
+df = pd.read_csv('path/to/data.csv')
+for sport in df['Sport'].unique():
+    sport_data = df[df['Sport'] == sport]
+    ax.plot(sport_data['Year'], sport_data['Value'],
+            label=sport, color='#hex', linewidth=2)
+```
+
+**Bar Chart from CSV:**
+```python
+df = pd.read_csv('path/to/data.csv')
+categories = df['Category']
+values = df['Value']
+ax.bar(categories, values, color='#hex', alpha=0.8)
+plt.xticks(rotation=45, ha='right')
+```
+
+**Scatter Plot from CSV:**
+```python
+df = pd.read_csv('path/to/data.csv')
+scatter = ax.scatter(df['X'], df['Y'],
+                     c=df['Color_Column'],
+                     s=df['Size_Column'] if 'Size_Column' in df.columns else 20,
+                     alpha=0.6, cmap='viridis')
+plt.colorbar(scatter, label='Color_Label')
+```
+
+**Time Series from CSV:**
+```python
+df = pd.read_csv('path/to/data.csv')
+df['Date'] = pd.to_datetime(df['Date'])
+df = df.sort_values('Date')
+ax.plot(df['Date'], df['Value'], linewidth=2)
+ax.tick_params(axis='x', rotation=45)
+```
+
+### Data Exploration (for debugging):
+```python
+# Print column names to understand data structure
+df = pd.read_csv('path/to/data.csv')
+print("Columns:", df.columns.tolist())
+print("Shape:", df.shape)
+print("First few rows:\\n", df.head())
+```
+
+## Response Format
+
+Respond with ONLY the Python code block. Start immediately with ```python and end with ```. No additional text.
+
+**CRITICAL REMINDERS**:
+1. If CSV files are listed, USE THEM with pd.read_csv(FULL_PATH)
+2. The variable `save_path` will be provided when your code is executed
+3. Handle missing data and edge cases gracefully
+"""
+
+
+CHART_CODE_FIXING_PROMPT = """\
+You are a Python code debugging expert specializing in matplotlib and data visualization. Your task is to fix code that has errors.
+
+# Problem Description:
+$problem_description
+
+# Original Code with Error:
+```python
+$original_code
+```
+
+# Error Information:
+$error_info
+
+# Available Variables in Execution Environment:
+- `plt`: matplotlib.pyplot module (already imported)
+- `pd`: pandas module (already imported)
+- `np`: numpy module (already imported)
+- `Path`: pathlib.Path module (already imported)
+- `save_path`: str = '$save_path'  # Full path where chart should be saved
+
+# CRITICAL Requirements:
+1. **Do NOT add any import statements** (modules are already available)
+2. **You MUST use `plt.savefig(save_path)` to save the chart** at the specified path
+3. **Do NOT use hardcoded filenames** like "chart.png" or "output.png"
+4. **Do NOT use relative paths** - always use the `save_path` variable
+5. **Do NOT use `Template`, `string.Template`, or any string templating** - these are NOT available
+6. Fix all syntax errors, type errors, and logical errors
+7. Ensure the code will execute without errors
+
+# Common Issues to Check and Fix:
+- **Missing colons** (:) after if, for, while, def, class statements
+- **Unmatched parentheses**, brackets, or quotes
+- **Indentation errors** (mixing tabs and spaces)
+- **Using variables that don't exist** (check column names, file paths)
+- **Type mismatches** (e.g., treating DataFrame as Series, missing .values)
+- **Division by zero** or invalid mathematical operations
+- **Missing data handling** (NaN, None, empty strings)
+- **Incorrect savefig usage** (wrong path, missing dpi parameter, etc.)
+- **DataFrame column access errors** (using wrong column names)
+- **Missing plt.close() calls** (memory leaks)
+- **Figure creation issues** (missing plt.subplots(), wrong figsize)
+
+# Output Format:
+Return ONLY the corrected Python code, wrapped in ```python``` code blocks.
+Do NOT include any explanations or commentary outside the code block.
+"""
+
+
+PROBLEM_EXTRACT_PROMPT = """\
+You are tasked with extracting detailed and complete information from the following mathematical modeling question.  
+
+<MODELING_QUESTION>
+{question}
+</MODELING_QUESTION>
+
+### Extraction Requirements:  
+From the provided `<MODELING_QUESTION>`, extract and organize the following information as accurately and comprehensively as possible. Preserve the original text wherever applicable and do not omit any relevant details.  
+
+1. **"BACKGROUND"**: Extract all background information that provides context for the problem. This includes the problem's domain, motivation, assumptions, or any other relevant introductory details.  
+2. **"TASK_REQUIREMENTS"**: A String to list all the requirements that need to be solved and satisfied, including specific instructions, constraints, objectives, and expected outputs.  
+3. **"DATA_FILES"**: A List to identify and list all dataset filenames mentioned in the question (if applicable). There may be multiple dataset files.  
+4. **"DATA_DESCRIPTIONS"**: Extract dataset descriptions, including details about the structure, features, variables, or metadata. If dataset descriptions are provided in a separate file, extract and list the filename instead.  
+5. **"ADDENDUM"**: Include any additional information that might be useful for solving the problem. This can include notes, references, clarifications, hints, or supplementary instructions.  
+
+### Expected Response Format:  
+Provide the extracted information in the following structured JSON format:  
+
+```json
+{{
+  "background": "",
+  "task_requirements": "",
+  "data_files": [],
+  "data_descriptions": "",
+  "addendum": ""
+}}
+```
+
+Ensure maximum fidelity to the original text and extract details as comprehensively as possible.
+"""
+
+
+
+TASK_DEPENDENCY_ANALYSIS_PROMPT = """\
+Understanding the dependencies among different tasks in a mathematical modeling process is crucial for ensuring a coherent, logically structured, and efficient solution. Given a mathematical modeling problem and its solution decomposition into {tasknum} subtasks, analyze the interdependencies among these subtasks.  
+
+## Input Information:
+- **Mathematical Modeling Problem:** {modeling_problem}
+- **Problem Analysis:** {problem_analysis}
+- **Modeling Solution:** {modeling_solution}
+- **Decomposed Tasks:** {task_descriptions}
+
+## Task Dependency Analysis Instructions:
+1. **Identify Task Dependencies:** For each task, determine which preceding tasks provide necessary input, data, or conditions for its execution. Clearly outline how earlier tasks influence or constrain later ones.
+2. **Describe Dependency Types:** Specify the nature of the dependencies between tasks. This includes:
+   - *Data Dependency:* When one task produces outputs that are required as inputs for another task.
+   - *Methodological Dependency:* When a later task builds upon a theoretical framework, assumptions, or models established by an earlier task.
+   - *Computational Dependency:* When a task requires prior computations or optimizations to be completed before proceeding.
+   - *Structural Dependency:* When a task is logically required to be completed before another due to hierarchical or sequential constraints.
+3. **Ensure Completeness:** Verify that all tasks in the decomposition are accounted for in the dependency analysis and that no essential dependencies are missing.
+
+## Output Format:  
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as {tasknum} cohesive paragraphs, each paragraph is a dependency analysis of a task.
+
+The response should be comprehensive and written in a clear, well-structured format without bullet points, ensuring a logical flow of dependency relationships and their implications.
+"""
+
+
+TASK_DEPENDENCY_ANALYSIS_WITH_CODE_PROMPT = """\
+Understanding the dependencies among different tasks in a mathematical modeling process is crucial for ensuring a coherent, logically structured, and efficient solution. Given a mathematical modeling problem and its solution decomposition into {tasknum} subtasks, analyze the interdependencies among these subtasks.  
+
+## Input Information:
+- **Mathematical Modeling Problem:** {modeling_problem}
+- **Problem Analysis:** {problem_analysis}
+- **Modeling Solution:** {modeling_solution}
+- **Decomposed Tasks:** {task_descriptions}
+
+## Task Dependency Analysis Instructions:
+1. **Identify Task Dependencies:** For each task, determine which preceding tasks provide necessary input, data, or conditions for its execution. Clearly outline how earlier tasks influence or constrain later ones.
+2. **Describe Dependency Types:** Specify the nature of the dependencies between tasks. This includes:
+   - *Data Dependency:* When one task produces outputs that are required as inputs for another task.
+   - *Methodological Dependency:* When a later task builds upon a theoretical framework, assumptions, or models established by an earlier task.
+   - *Computational Dependency:* When a task requires prior computations or optimizations to be completed before proceeding.
+   - *Structural Dependency:* When a task is logically required to be completed before another due to hierarchical or sequential constraints.
+   - *Code Dependency:* When one task relies on code structures, functions, or modules that are defined or executed in a preceding task. This includes shared variables, functions, or libraries that must be defined before their use in later tasks.
+3. **Ensure Completeness:** Verify that all tasks in the decomposition are accounted for in the dependency analysis and that no essential dependencies are missing.
+
+## Output Format:  
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as {tasknum} cohesive paragraphs, each paragraph is a dependency analysis of a task.
+
+The response should be comprehensive and written in a clear, well-structured format without bullet points, ensuring a logical flow of dependency relationships and their implications.
+"""
+
+
+DAG_CONSTRUCTION_PROMPT = """\
+A well-structured Directed Acyclic Graph (DAG) is essential for visualizing and optimizing the dependencies between different tasks in a mathematical modeling process. Given a problem and its solution decomposition into {tasknum} subtasks, construct a DAG that accurately represents the dependency relationships among these tasks. The DAG should capture all necessary dependencies while ensuring that no cycles exist in the structure.  
+
+## Input Information:
+- **Mathematical Modeling Problem:** {modeling_problem}
+- **Problem Analysis:** {problem_analysis}
+- **Modeling Solution:** {modeling_solution}
+- **Decomposed Tasks:** {task_descriptions}
+- **Dependency Analysis:** {task_dependency_analysis}
+
+## Output Format (CRITICAL REQUIREMENTS):
+You **MUST** return a valid JSON-formatted adjacency list **without** any additional text, explanations, or comments. **Only** output the JSON object.
+
+## CRITICAL: Strict JSON Format Requirements
+
+Your JSON MUST follow these rules **exactly**:
+
+### Rule 1: NO Comments
+[X] **WRONG**: `{{"1": [], // task 1 has no dependencies}}`
+[OK] **CORRECT**: `{{"1": []}}`
+
+### Rule 2: NO Trailing Commas
+[X] **WRONG**: `{{"1": [], "2": ["1"],}}`
+[OK] **CORRECT**: `{{"1": [], "2": ["1"]}}`
+
+### Rule 3: Double Quotes ONLY
+[X] **WRONG**: `{{'1': [], "2": ["1"]}}`
+[OK] **CORRECT**: `{{"1": [], "2": ["1"]}}`
+
+### Rule 4: Key Format Requirements
+The JSON keys **MUST** be simple integers as strings: "1", "2", "3", "4", etc.
+
+[X] **WRONG** key formats (DO NOT USE):
+- "Subtask_1", "Subtask_2" [X]
+- "Task 1", "Task 2" [X]
+- "task_1", "task_2" [X]
+- "Task1", "Task2" [X]
+
+[OK] **CORRECT** key format (USE THIS):
+- "1", "2", "3", "4" [OK]
+
+### Rule 5: Value Format
+Values MUST be arrays of string keys (even for single elements).
+
+[X] **WRONG**: `{{"2": "1"}}` (string instead of array)
+[X] **WRONG**: `{{"2": [1]}}` (integer instead of string)
+[OK] **CORRECT**: `{{"2": ["1"]}}` (array of strings)
+
+## VALID Output Example:
+```json
+{{
+"1": [],
+"2": ["1"],
+"3": ["1"],
+"4": ["2", "3"]
+}}
+```
+
+**ENFORCEMENT**:
+- Your JSON will be parsed by `json.loads()` - it MUST be 100% valid JSON
+- NO tolerance for syntax errors
+- NO markdown code blocks (just the raw JSON)
+- NO explanations before or after the JSON
+
+**IMPORTANT**: The keys in your JSON must be EXACTLY "1", "2", "3", "4" - no prefixes, no spaces, no variations.
+"""
+
+# TASK_ANALYSIS_APPEND_PROMPT = """\
+# When analyzing the current task, please pay careful attention to its dependencies on other tasks. Ensure that you consider how the outputs or results from preceding tasks influence the execution and outcomes of this task. Identify any tasks that provide necessary inputs, data, or models, and explain how these dependencies shape the approach, methods, and overall execution of the task at hand. This analysis should be informed by the task dependency relationships, which will help clarify how the current task fits into the broader project or workflow. Keep in mind that the successful completion of this task may depend on the timely and correct completion of other tasks, and any delays or issues in the dependent tasks could impact the current task's progress and outcomes.
+# """
+#             
+# TASK_FORMULAS_APPEND_PROMPT = """\
+# When formulating the mathematical model for the current task, it is essential to consider how this task depends on other tasks in the overall process. Be sure to analyze how the results, data, or models produced by preceding tasks influence the formulation of the current task. Identify any critical inputs or assumptions that come from earlier tasks and explain how these shape the approach, variables, or constraints in the mathematical formulation. In particular, pay attention to how the completion of dependent tasks impacts the accuracy, feasibility, or computational aspects of the model. This dependency analysis will help ensure that the model reflects the correct sequence of steps, and that any limitations or challenges arising from earlier tasks are properly accounted for. Ensure that the interdependencies between tasks are fully integrated into the mathematical formulation to maintain consistency and validity across the entire modeling process.
+# """
+# 
+# TASK_MODELING_APPEND_PROMPT = """\
+# Please continue the modeling process by considering the dependencies between the current task and the preceding tasks. Begin by analyzing how the outputs or models from earlier tasks influence the formulation and execution of the current task. Describe the interdependencies in detail, explaining how the results from previous tasks provide necessary data, constraints, or assumptions that affect the current task's modeling approach. Identify any key variables, parameters, or methods that are directly linked to earlier tasks and discuss how their incorporation into the current task ensures consistency and accuracy across the entire modeling framework. Additionally, consider any potential challenges or limitations introduced by the dependencies, such as delays or uncertainty in the results from prior tasks, and explain how these factors might be addressed in the modeling process. Ensure that these dependencies are clearly integrated into the continued modeling effort, providing a cohesive and comprehensive understanding of how the tasks interconnect and contribute to the overall solution.
+# """
+
+TASK_ANALYSIS_APPEND_PROMPT = """\
+When analyzing the current task, please pay careful attention to its dependencies on other tasks.
+"""
+            
+TASK_FORMULAS_APPEND_PROMPT = """\
+When formulating the mathematical model for the current task, it is essential to consider how this task depends on other tasks in the overall process.
+"""
+
+TASK_MODELING_APPEND_PROMPT = """\
+Please consider the dependencies between the current task and the preceding tasks.
+"""
+
+CODE_STRUCTURE_PROMPT = """\
+You are a programming expert. Please extract the structure from the following code and output it in the following JSON format, please return an empty list if the corresponding item is not available.:
+The code is:
+```python
+{code}
+```
+
+## CRITICAL: JSON Format Requirements
+
+You **MUST** return valid JSON only. No additional text, no explanations, no markdown code blocks.
+
+**Common JSON Mistakes to AVOID:**
+[X] **WRONG**: Trailing commas like `{{"key": "value",}}`  <- Remove comma before closing brace
+[X] **WRONG**: Missing commas like `{{"key1": "value1" "key2": "value2"}}`  <- Add comma between elements
+[X] **WRONG**: Comments like `{{"key": "value"}} // comment`  <- JSON doesn't support comments
+[X] **WRONG**: Unquoted keys like `{{key: "value"}}`  <- Use `{{"key": "value"}}`
+[X] **WRONG**: Single quotes like `{{'key': 'value'}}`  <- Use `{{"key": "value"}}` with double quotes
+[X] **WRONG**: Multiline strings like `"text\\n"`  <- Use escaped newlines `\\n`
+
+**VALID JSON Format Rules:**
+[OK] Use **double quotes** for all strings and keys
+[OK] **No trailing commas** before }} or ]
+[OK] **Commas between ALL elements**
+[OK] **No comments** (// or /* */)
+[OK] **Escape special characters**: newline as `\\n`, tab as `\\t`, quote as `\\"`
+
+The output format is:
+```json
+{{
+    "script_path": {{save_path}}
+    "class": [
+    {{
+      "name": class name,
+      "description": description of class,
+      "class_functions": [
+        {{
+          "name": function name,
+          "description": description of class function,
+          "parameters": [
+            {{
+              "name": param name,
+              "type": param type,
+              "description": description of param,
+            }}
+          ],
+          "returns": {{
+            "description": "return of the function."
+          }},
+        }}
+      ]
+    }}
+  ],
+  "function": [
+    {{
+      "name": function name,
+      "description": description of class function,
+      "parameters": [
+        {{
+          "name": param name,
+          "type": param type,
+          "description": description of param,
+        }}
+      ],
+      "returns": {{
+        "description": "return of the function."
+      }},
+    }}
+  ],
+  "file_outputs": [
+    {{
+      "path": "file_path",
+      "file_description": "description of the file",
+      "column_name": ["column_name_if_csv_else_None"]
+    }}
+  ]
+}}
+```
+
+**IMPORTANT**: Return ONLY the JSON object. Do NOT include ```json``` markdown code blocks. Do NOT add any explanatory text before or after the JSON.
+"""
+
+
+PAPER_CHAPTER_PROMPT = """\
+You are tasked with creating a publication-quality LaTeX chapter for a mathematical modeling research paper. Carefully transform the provided structured draft into a coherent, rigorous, and concise narrative chapter that aligns logically and seamlessly with the previously written content.
+
+## Target Chapter:
+$chapter_path
+
+## Structured Draft:
+<structured_draft>
+$json_context
+</structured_draft>
+
+## Preceding Chapters (for seamless narrative integration and avoiding repetition):
+<preceding_content>
+$previous_chapters
+</preceding_content>
+
+## Requirements:
+- Write exclusively in accurate, idiomatic LaTeX; avoid Markdown syntax and symbols entirely.
+- Clearly indicate the chapter content corresponds precisely to the target chapter `$chapter_path`; do not repeat or reference explicitly the content of other chapters.
+- Present the chapter as a continuous, fluent narrative without section headings, subsections, bullet points, or numbered lists, Response only chapter content, do not include headlines and anything else.
+- Critically evaluate the structured draft, selecting only most high-quality important and relevant content. Remove all redundancy, eliminate low-value statements, and distill essential information clearly and succinctly.
+- Maintain rigorous academic style, logical coherence, and clarity throughout, ensuring that the chapter integrates naturally with preceding chapters.
+
+## CRITICAL - LaTeX Table Overflow Prevention:
+- For ALL tables, use `\\begin{{{tabular}}}``{{{p{{{width}}} p{{{width}}} ...}}}}` format instead of `l c r` to control column width
+- Wrap long table cell text using fixed-width p columns (e.g., `p{{{8cm}}}`, `p{{{10cm}}}`)
+- Use `\\begin{{{tabularx}}}``{{{\\textwidth}}}``{{{X X X ...}}}}` from tabularx package for automatic width adjustment
+- For tables that might overflow, wrap entire table in `\\resizebox{{{\\textwidth}}}``{{{!}}}``{{{...}}}`` as LAST RESORT
+- Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
+- Keep table column count reasonable (max 6-7 columns for portrait, 8-10 for landscape)
+- Split wide tables into multiple smaller tables if necessary
+- Use `\\small` or `\\footnotesize` inside table if needed to reduce font size
+- For multi-page tables, use `longtable` environment instead of `table`
+- For very wide tables, consider using `sidewaystable` from rotating package
+
+## CRITICAL - LaTeX Equation Overflow Prevention:
+- Use `\\begin{{{align}}}` with manual line breaks (`\\\\`) for multi-line equations
+- Use `\\begin{{{multline}}}` for single equations spanning multiple lines (first line left, last line right)
+- Use `\\begin{{{split}}}` inside `equation` environment for splitting with alignment
+- Insert line breaks (`\\\\`) BEFORE equation exceeds page margin
+- Use `\\notag` on intermediate lines if only labeling the last equation
+- Break LONG fractions using `\\frac{{{numerator}}}``{{{denominator}}}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
+- Use `\\displaystyle` only when necessary (it makes equations larger)
+- For integrals/sums with long limits, use `\\limits_{{\\substack{{{line1 \\\\\\\\ line2}}}}}` for multi-line limits
+- Break long equations at logical operators (=, +, -, \\times)
+- Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{{{array}}}...\\end{{{array}}}\\right)`
+
+## CRITICAL - Formula Display Best Practices:
+- Integrate mathematical formulas using correct LaTeX environments: `\\begin{{{align}}}...\\end{{{align}}}`, `\\begin{{{equation}}}...\\end{{{equation}}}`
+- Truncate and wrap long formulas and symbols BEFORE they overflow
+- Use inline math `$$...$$` for short expressions only
+- Use display math `\\[...\\]` or environments for multi-line expressions
+- Avoid `\\left(` and `\\right)` across line breaks - use `\\Bigl(` `\\Bigr)` or explicit sizes instead
+
+## Output Format:
+```latex
+CHAPTER_CONTENT_TEXT
+```
+
+"""
+
+PAPER_CHAPTER_WITH_PRECEDING_PROMPT = """\
+You are tasked with generating a publication-quality LaTeX chapter for a mathematical modeling paper. Write a cohesive, academically rigorous chapter that integrates seamlessly with the preceding content of the paper.
+
+## Chapter to write:
+$chapter_path
+
+## Preceding Content:
+<preceding_content>
+$previous_chapters
+</preceding_content>
+
+## Writing Requirements:
+- Use accurate and proper LaTeX syntax throughout, avoid all Markdown syntax or symbols.
+- Present the content as a continuous, coherent narrative without using sections, subsections, or bullet points. Response only chapter content, do not include headlines and anything else.
+- Make it clear that the section you need to write is `$chapter_path`. Do not involve the content of other chapters.
+
+## CRITICAL - LaTeX Table Overflow Prevention:
+- For ALL tables, use `\\begin{{{tabular}}}``{{{p{{{width}}} p{{{width}}} ...}}}}` format instead of `l c r` to control column width
+- Wrap long table cell text using fixed-width p columns (e.g., `p{{{8cm}}}`, `p{{{10cm}}}`)
+- Use `\\begin{{{tabularx}}}``{{{\\textwidth}}}``{{{X X X ...}}}}` from tabularx package for automatic width adjustment
+- For tables that might overflow, wrap entire table in `\\resizebox{{{\\textwidth}}}``{{{!}}}``{{{...}}}`` as LAST RESORT
+- Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
+- Keep table column count reasonable (max 6-7 columns for portrait, 8-10 for landscape)
+- Split wide tables into multiple smaller tables if necessary
+- Use `\\small` or `\\footnotesize` inside table if needed to reduce font size
+- For multi-page tables, use `longtable` environment instead of `table`
+- For very wide tables, consider using `sidewaystable` from rotating package
+
+## CRITICAL - LaTeX Equation Overflow Prevention:
+- Use `\\begin{{{align}}}` with manual line breaks (`\\\\`) for multi-line equations
+- Use `\\begin{{{multline}}}` for single equations spanning multiple lines (first line left, last line right)
+- Use `\\begin{{{split}}}` inside `equation` environment for splitting with alignment
+- Insert line breaks (`\\\\`) BEFORE equation exceeds page margin
+- Use `\\notag` on intermediate lines if only labeling the last equation
+- Break LONG fractions using `\\frac{{{numerator}}}``{{{denominator}}}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
+- Use `\\displaystyle` only when necessary (it makes equations larger)
+- For integrals/sums with long limits, use `\\limits_{{\\substack{{{line1 \\\\\\\\ line2}}}}}` for multi-line limits
+- Break long equations at logical operators (=, +, -, \\times)
+- Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{{{array}}}...\\end{{{array}}}\\right)`
+
+## CRITICAL - Formula Display Best Practices:
+- Integrate mathematical formulas using correct LaTeX environments: `\\begin{{{align}}}...\\end{{{align}}}`, `\\begin{{{equation}}}...\\end{{{equation}}}`
+- Truncate and wrap long formulas and symbols BEFORE they overflow
+- Use inline math `$$...$$` for short expressions only
+- Use display math `\\[...\\]` or environments for multi-line expressions
+- Avoid `\\left(` and `\\right)` across line breaks - use `\\Bigl(` `\\Bigr)` or explicit sizes instead
+"""
+
+PAPER_NOTATION_PROMPT = """
+You are an AI assistant trained to extract and typeset the Notations table from a mathematical modeling paper in LaTeX format. Your task is to take the input paper and output a properly formatted LaTeX table displaying the notations used in the paper.
+
+1. Well-structured and easy to read.
+2. Properly typeset for LaTeX documents.
+3. Adaptive in size and position to fit neatly into any document.
+4. Truncate and wrap long formulas, symbols and text in the table for better readability.
+
+<paper>
+$previous_chapters
+</paper>
+
+## CRITICAL - Table Overflow Prevention:
+- Use `p{{{width}}` columns (e.g., `p{{{3cm}}` p{{{11cm}}}`) to control column width and prevent overflow
+- Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
+- Wrap entire table in `\\resizebox{{{\\textwidth}}}``{{{!}}}``{{{...}}}`` if table is still too wide (LAST RESORT)
+- Use `\\small` or `\\footnotesize` inside table if needed
+- Split notation table into multiple tables if there are too many entries (>30 rows)
+- Consider using `longtable` environment if table spans multiple pages
+
+Example of Table Format:
+```latex
+\\begin{{{table}}}[H]
+    \\centering
+    \\renewcommand{{{\\arraystretch}}}``{{1.3}}`
+    \\begin{{{tabular}}}``{{{>{{\\raggedright\\arraybackslash}}p{{{3cm}}}`>{{\\raggedright\\arraybackslash}}p{{{11cm}}}}}`
+        \\toprule
+        \\textbf{{{Notation}}} & \\textbf{{{Description}}} \\\\
+        \\midrule
+        \\( f(x) \\) & description... \\\\
+        \\bottomrule
+    \\end{{{tabular}}}
+    \\caption{{{Table of Notations}}}
+    \\label{{{tab:notations}}}
+\\end{{{table}}}
+```
+
+Response only latex table content, do not include headlines and anything else.
+"""
+
+
+PAPER_INFO_PROMPT = """\
+You are an expert academic writer tasked with analyzing paper chapters and generating key metadata for a mathematical modeling paper.
+
+# Input Chapters
+$paper_chapters
+
+Based on the content of these chapters, please generate:
+1. A concise, descriptive title that reflects the paper's main focus
+2. A comprehensive and detailed summary highlighting key findings and methodology
+3. 4-6 relevant keywords that capture the paper's main themes
+
+Returns the Legal JSON Format:
+```Json
+{{
+    "title": "A clear, concise title",
+    "summary": "A well-structured summary covering the following information: \n- Restatement and Clarification of the Problem: Describe the problem to be solved in your own words.\n- Explanation of Assumptions and Their Rationality: Highlight the assumptions made in the modeling process and clearly list all the variables required for the model.\n- Model Design and Rationality Argumentation: Specify the type of model used or describe the construction of a new model, explain how it was established and the rationale behind its design.\n- Description of Model Testing and Sensitivity Analysis: Include error analysis and other testing items.",
+    "keywords": "keyword1; keyword2; keyword3; keyword4..."
+}}
+```
+
+Requirements:
+- Title should be specific and academic in tone
+- Summary should follow standard academic abstract structure and be approximately 400 words
+- Keywords should be ordered from general to specific
+- must return a strictly legal JSON
+"""
+
+
+# P1-6: JSON-based Chart Configuration Prompt
+CHART_TO_JSON_PROMPT = r"""\
+You are an expert data visualization specialist. Your task is to convert a chart description into a STRUCTURED JSON configuration that defines the chart.
+
+## Chart Description
+
+$chart_description
+
+## Available Data Files and Columns
+
+$data_columns_info
+
+## Your Task
+
+Generate a JSON configuration object that describes the chart. The JSON will be used by a template renderer to generate matplotlib code automatically.
+
+## JSON Schema
+
+```json
+{{
+  "chart_type": "bar|line|scatter|histogram|box|violin|heatmap|pie|area",
+  "title": "Chart title",
+  "width": 10,
+  "height": 6,
+  "dpi": 100,
+
+  "data_source": {{
+    "file": "filename.csv",
+    "filters": []
+  }},
+
+  "x_axis": {{
+    "label": "X-axis label",
+    "column": "column_name_in_data",
+    "scale": "linear",
+    "limits": [min, max]
+  }},
+
+  "y_axis": {{
+    "label": "Y-axis label",
+    "column": "column_name_in_data",
+    "scale": "linear",
+    "limits": [min, max]
+  }},
+
+  "series": [
+    {{
+      "name": "Series 1",
+      "x_column": "x_col_name",
+      "y_column": "y_col_name",
+      "color": "blue",
+      "marker": "o",
+      "linestyle": "-",
+      "alpha": 1.0,
+      "aggregation": "none|sum|mean|median|count"
+    }}
+  ],
+
+  "color_palette": "viridis|plasma|inferno|magma",
+  "grid": true,
+  "legend": {{
+    "show": true,
+    "position": "best",
+    "title": "Legend Title"
+  }},
+
+  "annotations": [],
+
+  "extra_params": {{}}
+}}
+```
+
+## Chart Types
+
+- **bar**: Bar chart (categorical data)
+- **line**: Line chart (time series, trends)
+- **scatter**: Scatter plot (correlations, distributions)
+- **histogram**: Histogram (frequency distributions)
+- **box**: Box plot (statistical summary, outliers)
+- **violin**: Violin plot (distribution shape)
+- **heatmap**: Heatmap (correlation matrix)
+- **pie**: Pie chart (proportions)
+- **area**: Area chart (cumulative totals)
+
+## Aggregation Methods
+
+For grouped data:
+- **sum**: Sum of values
+- **mean**: Average of values
+- **median**: Median of values
+- **count**: Count of observations
+- **std**: Standard deviation
+- **none**: No aggregation (use raw data)
+
+## CRITICAL REQUIREMENTS
+
+### 1. Use ONLY Available Columns
+
+**You MUST ONLY use column names from the "Available Data Files and Columns" section above.**
+
+❌ **WRONG - Inventing columns:**
+```json
+"y_column": "Performance_Metric"  // This column doesn't exist!
+```
+
+✅ **CORRECT - Using actual columns:**
+```json
+"y_column": "Gold"  // From the available columns list
+```
+
+### 2. Validate Column Existence
+
+Before specifying a column, verify it exists in the available columns list.
+
+**If the chart description mentions a concept (like "Performance", "Efficiency", "Quality") that is NOT a direct column name:**
+
+Option 1: **Use the closest available column**
+- Description mentions "Medal Performance" → Use "Gold", "Silver", "Bronze" columns
+
+Option 2: **Create derived column in extra_params**
+- Add a note in "annotations" about the transformation needed
+
+Option 3: **Choose a simpler chart with available data**
+- Use aggregation with available columns instead
+
+### 3. Choose Appropriate Chart Type
+
+Match the chart type to the data and visualization goal:
+
+| Data Type | Recommended Chart Types |
+|-----------|-------------------------|
+| Categorical vs Numerical | bar, box |
+| Time series | line, area |
+| Correlation between 2 numerical vars | scatter |
+| Distribution of 1 numerical var | histogram, box, violin |
+| Proportions | pie |
+| Multiple series over time | line (with multiple series) |
+
+### 4. Proper Axis Configuration
+
+- **x_axis.column**: Required for most charts (categories or time)
+- **y_axis.column**: Required for numerical values
+- **series**: Optional, for multiple data series
+
+**For single-series charts:**
+```json
+{{
+  "x_axis": {{"column": "Year", "label": "Year"}},
+  "y_axis": {{"column": "Gold", "label": "Gold Medals"}}
+}}
+```
+
+**For multi-series charts:**
+```json
+{{
+  "series": [
+    {{"name": "Gold", "x_column": "Year", "y_column": "Gold"}},
+    {{"name": "Silver", "x_column": "Year", "y_column": "Silver"}}
+  ]
+}}
+```
+
+## Example Configurations
+
+### Example 1: Simple Bar Chart
+```json
+{{
+  "chart_type": "bar",
+  "title": "Medal Counts by Country",
+  "width": 12,
+  "height": 6,
+  "data_source": {{"file": "summerOly_medal_counts.csv"}},
+  "x_axis": {{"column": "NOC", "label": "Country"}},
+  "y_axis": {{"column": "Total", "label": "Total Medals"}},
+  "grid": true
+}}
+```
+
+### Example 2: Multi-Line Chart
+```json
+{{
+  "chart_type": "line",
+  "title": "Medal Trends Over Time",
+  "width": 12,
+  "height": 6,
+  "data_source": {{"file": "summerOly_medal_counts.csv"}},
+  "series": [
+    {{"name": "Gold", "x_column": "YEAR", "y_column": "GOLD", "color": "gold"}},
+    {{"name": "Silver", "x_column": "YEAR", "y_column": "SILVER", "color": "silver"}},
+    {{"name": "Bronze", "x_column": "YEAR", "y_column": "BRONZE", "color": "#cd7f32"}}
+  ],
+  "x_axis": {{"label": "Year"}},
+  "y_axis": {{"label": "Medal Count"}},
+  "legend": {{"show": true, "position": "upper left"}}
+}}
+```
+
+### Example 3: Scatter Plot
+```json
+{{
+  "chart_type": "scatter",
+  "title": "Athlete Height vs Weight",
+  "width": 10,
+  "height": 8,
+  "data_source": {{"file": "summerOly_athletes.csv"}},
+  "series": [
+    {{
+      "name": "Athletes",
+      "x_column": "HEIGHT",
+      "y_column": "WEIGHT",
+      "marker": "o",
+      "alpha": 0.3
+    }}
+  ],
+  "x_axis": {{"label": "Height (cm)"}},
+  "y_axis": {{"label": "Weight (kg)"}}
+}}
+```
+
+### Example 4: Histogram
+```json
+{{
+  "chart_type": "histogram",
+  "title": "Distribution of Athlete Ages",
+  "width": 10,
+  "height": 6,
+  "data_source": {{"file": "summerOly_athletes.csv"}},
+  "series": [
+    {{
+      "name": "All Athletes",
+      "y_column": "AGE",
+      "alpha": 0.7
+    }}
+  ],
+  "x_axis": {{"label": "Age"}},
+  "y_axis": {{"label": "Frequency"}},
+  "extra_params": {{"bins": 30}}
+}}
+```
+
+## Output Format
+
+**Return ONLY the JSON object. No explanations, no markdown code blocks.**
+
+The JSON should be valid and ready to parse with `json.loads()`.
+
+Start your response with the opening `{{` and end with `}}`.
+
+---
+"""
