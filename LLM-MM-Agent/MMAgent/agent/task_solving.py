@@ -551,7 +551,7 @@ class TaskSolver(BaseAgent):
         self.enable_latent_reporter = enable_latent_reporter
         self.reporter = None
         self._output_dir = output_dir
-        self._task_id = task_id or "Unknown"
+        self._task_id = task_id if task_id is not None else "General"
 
         # Defer reporter initialization until output_dir is confirmed available
         # (will be initialized lazily when first needed or explicitly via init_reporter())

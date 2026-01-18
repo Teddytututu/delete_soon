@@ -471,7 +471,8 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
 
         try:
             main_logger.info("[INFO] Stage 4: Generating solution paper (JSON, Markdown, LaTeX, PDF)...")
-            paper = generate_paper(llm, output_dir, name)
+            # [FIX] Generate paper from Workspace/json where solution is saved
+            paper = generate_paper(llm, dirs["workspace"], name)
 
             duration_stage4 = int(time.time() - start_stage4)
             tracker.end_stage("Solution Reporting", duration_stage4)
@@ -504,8 +505,10 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         main_logger.info(f"Solution keys: {list(solution.keys())}")
         main_logger.info(f"Usage: {llm.get_total_usage()}")
 
-        # Save usage data
-        write_json_file(f'{output_dir}/usage/{name}.json', llm.get_total_usage())
+        # Save usage data to Memory layer
+        usage_dir = Path(dirs["memory"]) / 'usage'
+        usage_dir.mkdir(parents=True, exist_ok=True)
+        write_json_file(usage_dir / f'{name}.json', llm.get_total_usage())
 
         # [NEW] LATENT REPORTER: Finalize research journal
         # Add concluding footer with total duration and completion status
@@ -529,7 +532,8 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         try:
             # Use MMBench evaluation with the main model
             main_logger.info(f"\n[INFO] Starting MMBench evaluation with main model: {config['model_name']}...")
-            solution_path = Path(output_dir) / "json" / f"{name}.json"
+            # [FIX] Read solution from Workspace/json where it was saved
+            solution_path = Path(dirs["workspace"]) / "json" / f"{name}.json"
             evaluation_report = run_mmbench_evaluation(key, config['model_name'], str(solution_path), output_dir, logger_manager)
             main_logger.info(f"[OK] MMBench evaluation complete: {evaluation_report}")
         except FileNotFoundError as e:

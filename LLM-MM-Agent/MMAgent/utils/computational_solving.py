@@ -51,6 +51,10 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
         main_logger = logger_manager.get_logger('main')
         logger_manager.log_progress(f"Task {task_id}: Code Generation...")
 
+    # [FIX] Define Workspace directory for structured output
+    workspace_dir = os.path.join(output_dir, "Workspace")
+    os.makedirs(workspace_dir, exist_ok=True)
+
     # CRITICAL FIX: Pass logger_manager to agents for proper error logging to errors.log
     # LATENT REPORTER INTEGRATION: Pass output_dir and task_id for LLM-powered narrative logging
     ts = TaskSolver(llm, logger_manager, output_dir=output_dir, task_id=str(task_id))
@@ -308,6 +312,21 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
         data_columns_info = ""
 
     if with_code:
+        # CRITICAL FIX [2026-01-18] BUG FIX: Read code template from file
+        # code_template_path is a Path object, but ts.coding() needs the file content as string
+        # Previously this caused: NameError: name 'code_template' is not defined
+        try:
+            with open(code_template_path, 'r', encoding='utf-8') as f:
+                code_template = f.read()
+            if logger_manager:
+                main_logger = logger_manager.get_logger('main')
+                main_logger.info(f"Successfully read code template from: {code_template_path}")
+        except Exception as e:
+            if logger_manager:
+                main_logger = logger_manager.get_logger('main')
+                main_logger.error(f"Failed to read code template from {code_template_path}: {e}")
+            raise FileNotFoundError(f"Cannot read code template: {code_template_path}") from e
+
         # CRITICAL FIX: Ensure data_path_for_coding is a string path
         # dataset_dir is the actual directory path like 'MMBench/dataset/2000_C'
         # coding() expects a string path for data_file parameter
@@ -511,7 +530,8 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     # [NEW] Store enhanced chart details with quality status
     task_dict['charts_detail'] = processed_charts
     solution['tasks'].append(task_dict)
-    save_solution(solution, name, output_dir)
+    # [FIX] Save to Workspace/json instead of root
+    save_solution(solution, name, workspace_dir)
 
     # Print summary to console (MINIMAL VERSION: binary success/failure)
     # Simplified from three-state (SUCCESS/PARTIAL/FAILED) to binary (success/failed)

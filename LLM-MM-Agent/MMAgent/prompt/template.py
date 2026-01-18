@@ -699,8 +699,8 @@ print(df)  # Too large, may have encoding issues
 ✅ **CORRECT** (Safe alternatives):
 ```python
 # Option 1: Print summary only
-print(f"Country medals shape: {{{country_medals.shape}}}")
-print(f"Columns: {{{country_medals.columns.tolist()}}}")
+print(f"Country medals shape: {{country_medals.shape}}")
+print(f"Columns: {{country_medals.columns.tolist()}}")
 
 # Option 2: Save to file instead
 country_medals.to_csv('country_medals.csv', index=False, encoding='utf-8')
@@ -728,9 +728,9 @@ for idx, row in df.iterrows():  # Millions of rows
 ```python
 # Strategy 1: Sample data for development (if dataset > 10,000 rows)
 if len(df) > 10000:
-    print(f"Large dataset detected ({{{len(df)}}} rows), sampling 10% for faster execution")
+    print(f"Large dataset detected ({{len(df)}} rows), sampling 10% for faster execution")
     df_sample = df.sample(frac=0.1, random_state=42)
-    print(f"Working with {{{len(df_sample)}}} rows")
+    print(f"Working with {{len(df_sample)}} rows")
 else:
     df_sample = df
 
@@ -751,7 +751,7 @@ print("[START] Beginning computation...")
 # ... your code here ...
 
 elapsed = time.time() - start_time
-print(f"[DONE] Computation completed in {{{elapsed:.1f}}} seconds")
+print(f"[DONE] Computation completed in {{elapsed:.1f}} seconds")
 if elapsed > 200:
     print("[WARNING] Code is approaching timeout limit!")
 ```
@@ -786,17 +786,17 @@ def timer(name=''):
     def decorator(func):
         def wrapper(*args, **kwargs):
             start = time.time()
-            print(f"[TIMER] {{{{name or func.__name__}}}} - Starting...")
+            print(f"[TIMER] {{name or func.__name__}} - Starting...")
             try:
                 result = func(*args, **kwargs)
                 elapsed = time.time() - start
-                print(f"[TIMER] {{{{name or func.__name__}}}} - Completed in {{{elapsed:.1f}}}s")
+                print(f"[TIMER] {{name or func.__name__}} - Completed in {{elapsed:.1f}}s")
                 if elapsed > 60:
-                    print(f"[WARNING] {{{{name or func.__name__}}}} took {{{elapsed:.1f}}}s (> 60s)")
+                    print(f"[WARNING] {{name or func.__name__}} took {{elapsed:.1f}}s (> 60s)")
                 return result
             except Exception as e:
                 elapsed = time.time() - start
-                print(f"[ERROR] {{{{name or func.__name__}}}} - Failed after {{{elapsed:.1f}}}s: {{{e}}}")
+                print(f"[ERROR] {{name or func.__name__}} - Failed after {{elapsed:.1f}}s: {{e}}")
                 raise
         return wrapper
     return decorator
@@ -998,14 +998,14 @@ def expensive_computation(df):
        raise ValueError("DataFrame is EMPTY! Check file path and encoding")
 
    if len(df) < 10:
-       raise ValueError(f"Data too small for modeling (only {{{len(df)}}} rows - minimum 10 required)")
+       raise ValueError(f"Data too small for modeling (only {{len(df)}} rows - minimum 10 required)")
 
    # Step 3: IMMEDIATELY inspect the data
    print("=" * 60)
    print("DATA INSPECTION - MANDATORY FIRST STEP")
    print("=" * 60)
-   print(f"Shape: {{{df.shape}}}")
-   print(f"Raw columns (before cleaning): {{{df.columns.tolist()}}}")
+   print(f"Shape: {{df.shape}}")
+   print(f"Raw columns (before cleaning): {{df.columns.tolist()}}")
    print("\\nFirst 5 rows:")
    print(df.head())
    print("\\nData types:")
@@ -1019,7 +1019,7 @@ def expensive_computation(df):
    df.columns = df.columns.str.replace(' ', '_')  # Replace spaces with underscores
    df.columns = df.columns.str.upper()  # Convert to UPPERCASE for consistency (YEAR, NOC, etc.)
 
-   print(f"\\nCleaned columns (standardized): {{{df.columns.tolist()}}}")
+   print(f"\\nCleaned columns (standardized): {{df.columns.tolist()}}")
    print("=" * 60)
 
    # Step 5: Use fuzzy matching instead of hardcoded names
@@ -1030,11 +1030,11 @@ def expensive_computation(df):
 
    if matching_cols:
        actual_col = matching_cols[0]
-       print(f"Found column '{{{target_col}}}' as '{{{actual_col}}}'")
+       print(f"Found column '{{target_col}}' as '{{actual_col}}'")
        # Use actual_col in your code
    else:
-       print(f"WARNING: No column matching '{{{target_col}}}' found!")
-       print(f"Available columns: {{{df.columns.tolist()}}}")
+       print(f"WARNING: No column matching '{{target_col}}' found!")
+       print(f"Available columns: {{df.columns.tolist()}}")
        # Use alternative approach or skip
    ```
 
@@ -1072,24 +1072,24 @@ def expensive_computation(df):
    for var in modeling_variables:
        if var not in available_columns:
            missing_vars.append(var)
-           print(f"ERROR: Variable '{{{var}}}' from modeling formulas NOT FOUND in dataset!")
+           print(f"ERROR: Variable '{{var}}' from modeling formulas NOT FOUND in dataset!")
 
    # Step 4: Handle missing variables
    if missing_vars:
-       print(f"CRITICAL ERROR: The following variables from modeling formulas don't exist: {{{missing_vars}}}")
-       print(f"Available columns are: {{{available_columns}}}")
+       print(f"CRITICAL ERROR: The following variables from modeling formulas don't exist: {{missing_vars}}")
+       print(f"Available columns are: {{available_columns}}")
        print(f"SOLUTION: You MUST either:")
-       print(f"  1. Use ONLY available columns from: {{{available_columns}}}")
+       print(f"  1. Use ONLY available columns from: {{available_columns}}")
        print(f"  2. CREATE missing columns from existing ones (e.g., df['Total'] = df['Gold'] + df['Silver'])")
        print(f"  3. SKIP the operation that requires missing variables")
-       raise ValueError(f"Cannot proceed: Missing variables {{{missing_vars}}}")
+       raise ValueError(f"Cannot proceed: Missing variables {{missing_vars}}")
 
    # Step 5: Only proceed if ALL required variables exist
    required_vars = ['var1', 'var2']  # Variables needed for YOUR specific task
    missing_required = [v for v in required_vars if v not in available_columns]
    if missing_required:
        print(f"Cannot complete task: Missing required columns: {{missing_required}}")
-       print(f"Please use alternative approach with available columns: {{{available_columns}}}")
+       print(f"Please use alternative approach with available columns: {{available_columns}}")
        # Return early or use alternative logic
        return None
    ```
@@ -1378,8 +1378,8 @@ print(country_medals)  # Crashes if data contains special characters
 ✅ **CORRECT** (Safe alternatives):
 ```python
 # Print summary only
-print(f"Shape: {{{country_medals.shape}}}")
-print(f"Columns: {{{country_medals.columns.tolist()}}}")
+print(f"Shape: {{country_medals.shape}}")
+print(f"Columns: {{country_medals.columns.tolist()}}")
 # Or save to file
 country_medals.to_csv('output.csv', index=False, encoding='utf-8')
 ```
@@ -1809,7 +1809,7 @@ Convert the above chart description into a complete, executable Python script us
 ```python
 # ✅ CORRECT - Use load_csv() with FILENAME ONLY
 df = load_csv('clean_athletes.csv')  # Filename only, no path!
-print(f"Loaded {{{len(df)}}} rows")
+print(f"Loaded {{len(df)}} rows")
 print(f"Columns: {{df.columns.tolist()}}")
 ```
 
@@ -1840,7 +1840,7 @@ print("=" * 60)
 print("DATA VALIDATION - MANDATORY")
 print("=" * 60)
 print(f"File: {{file_path}}")
-print(f"Shape: {{{df.shape}}}")
+print(f"Shape: {{df.shape}}")
 
 # CRITICAL CHECK: Is DataFrame empty?
 if df.empty:
@@ -1848,20 +1848,20 @@ if df.empty:
     print("SOLUTION: Check file path and encoding")
     raise ValueError("Cannot create chart from empty DataFrame")
 
-print(f"Raw columns: {{{df.columns.tolist()}}}")
+print(f"Raw columns: {{df.columns.tolist()}}")
 print(f"First 3 rows:\\n{{df.head(3)}}")
 print("=" * 60)
 
 # CRITICAL STEP 3: Standardize column names to UPPERCASE
 df.columns = df.columns.str.strip().str.upper()
-print(f"Standardized columns (UPPERCASE): {{{df.columns.tolist()}}}")
+print(f"Standardized columns (UPPERCASE): {{df.columns.tolist()}}")
 
 # CRITICAL STEP 4: Validate columns exist BEFORE using
 required_cols = ['COLUMN1', 'COLUMN2']  # Replace with UPPERCASE names
 missing = [c for c in required_cols if c not in df.columns]
 if missing:
     print(f"ERROR: Missing columns: {{missing}}")
-    print(f"Available: {{{df.columns.tolist()}}}")
+    print(f"Available: {{df.columns.tolist()}}")
     # Use fuzzy matching or create columns
 ```
 
@@ -1875,10 +1875,10 @@ if df.empty:
     raise ValueError("No data loaded!")
 
 if len(df) < 10:
-    raise ValueError(f"Data too small for analysis (only {{{len(df)}}} rows)")
+    raise ValueError(f"Data too small for analysis (only {{len(df)}} rows)")
 
-print(f"Loaded {{{len(df)}}} rows")
-print(f"Columns: {{{df.columns.tolist()}}}")
+print(f"Loaded {{len(df)}} rows")
+print(f"Columns: {{df.columns.tolist()}}")
 
 # Standardize column names to UPPERCASE
 df.columns = df.columns.str.strip().str.upper()
@@ -1892,7 +1892,7 @@ y = df['TOTAL_MEDALS']
 ```python
 # CORRECT: Load real data with proper encoding
 df = pd.read_csv('C:/Users/.../task1_olympic_features.csv', encoding='latin1')
-print(f"Loaded {{{len(df)}}} rows")
+print(f"Loaded {{len(df)}} rows")
 
 # Use real columns from the data
 x = df['Year']
@@ -2371,10 +2371,10 @@ $previous_chapters
 - Maintain rigorous academic style, logical coherence, and clarity throughout, ensuring that the chapter integrates naturally with preceding chapters.
 
 ## CRITICAL - LaTeX Table Overflow Prevention:
-- For ALL tables, use `\\begin{{{tabular}}}``{{{p{{{width}}} p{{{width}}} ...}}}}` format instead of `l c r` to control column width
-- Wrap long table cell text using fixed-width p columns (e.g., `p{{{8cm}}}`, `p{{{10cm}}}`)
-- Use `\\begin{{{tabularx}}}``{{{\\textwidth}}}``{{{X X X ...}}}}` from tabularx package for automatic width adjustment
-- For tables that might overflow, wrap entire table in `\\resizebox{{{\\textwidth}}}``{{{!}}}``{{{...}}}`` as LAST RESORT
+- For ALL tables, use `\begin{tabular}{p{width} p{width} ...}` format instead of `l c r` to control column width
+- Wrap long table cell text using fixed-width p columns (e.g., `p{8cm}`, `p{10cm}`)
+- Use `\\begin{tabularx}``{{{\\textwidth}}}``{X X X ...}}` from tabularx package for automatic width adjustment
+- For tables that might overflow, wrap entire table in `\resizebox{\textwidth}{!}{...}` as LAST RESORT
 - Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
 - Keep table column count reasonable (max 6-7 columns for portrait, 8-10 for landscape)
 - Split wide tables into multiple smaller tables if necessary
@@ -2383,19 +2383,19 @@ $previous_chapters
 - For very wide tables, consider using `sidewaystable` from rotating package
 
 ## CRITICAL - LaTeX Equation Overflow Prevention:
-- Use `\\begin{{{align}}}` with manual line breaks (`\\\\`) for multi-line equations
-- Use `\\begin{{{multline}}}` for single equations spanning multiple lines (first line left, last line right)
-- Use `\\begin{{{split}}}` inside `equation` environment for splitting with alignment
+- Use `\\begin{align}` with manual line breaks (`\\\\`) for multi-line equations
+- Use `\\begin{multline}` for single equations spanning multiple lines (first line left, last line right)
+- Use `\\begin{split}` inside `equation` environment for splitting with alignment
 - Insert line breaks (`\\\\`) BEFORE equation exceeds page margin
 - Use `\\notag` on intermediate lines if only labeling the last equation
-- Break LONG fractions using `\\frac{{{numerator}}}``{{{denominator}}}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
+- Break LONG fractions using `\\frac{numerator}``{denominator}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
 - Use `\\displaystyle` only when necessary (it makes equations larger)
 - For integrals/sums with long limits, use `\\limits_{{\\substack{{{line1 \\\\\\\\ line2}}}}}` for multi-line limits
 - Break long equations at logical operators (=, +, -, \\times)
-- Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{{{array}}}...\\end{{{array}}}\\right)`
+- Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{array}...\\end{array}\\right)`
 
 ## CRITICAL - Formula Display Best Practices:
-- Integrate mathematical formulas using correct LaTeX environments: `\\begin{{{align}}}...\\end{{{align}}}`, `\\begin{{{equation}}}...\\end{{{equation}}}`
+- Integrate mathematical formulas using correct LaTeX environments: `\\begin{align}...\\end{align}`, `\\begin{equation}...\\end{equation}`
 - Truncate and wrap long formulas and symbols BEFORE they overflow
 - Use inline math `$$...$$` for short expressions only
 - Use display math `\\[...\\]` or environments for multi-line expressions
@@ -2425,10 +2425,10 @@ $previous_chapters
 - Make it clear that the section you need to write is `$chapter_path`. Do not involve the content of other chapters.
 
 ## CRITICAL - LaTeX Table Overflow Prevention:
-- For ALL tables, use `\\begin{{{tabular}}}``{{{p{{{width}}} p{{{width}}} ...}}}}` format instead of `l c r` to control column width
-- Wrap long table cell text using fixed-width p columns (e.g., `p{{{8cm}}}`, `p{{{10cm}}}`)
-- Use `\\begin{{{tabularx}}}``{{{\\textwidth}}}``{{{X X X ...}}}}` from tabularx package for automatic width adjustment
-- For tables that might overflow, wrap entire table in `\\resizebox{{{\\textwidth}}}``{{{!}}}``{{{...}}}`` as LAST RESORT
+- For ALL tables, use `\begin{tabular}{p{width} p{width} ...}` format instead of `l c r` to control column width
+- Wrap long table cell text using fixed-width p columns (e.g., `p{8cm}`, `p{10cm}`)
+- Use `\\begin{tabularx}``{{{\\textwidth}}}``{X X X ...}}` from tabularx package for automatic width adjustment
+- For tables that might overflow, wrap entire table in `\resizebox{\textwidth}{!}{...}` as LAST RESORT
 - Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
 - Keep table column count reasonable (max 6-7 columns for portrait, 8-10 for landscape)
 - Split wide tables into multiple smaller tables if necessary
@@ -2437,19 +2437,19 @@ $previous_chapters
 - For very wide tables, consider using `sidewaystable` from rotating package
 
 ## CRITICAL - LaTeX Equation Overflow Prevention:
-- Use `\\begin{{{align}}}` with manual line breaks (`\\\\`) for multi-line equations
-- Use `\\begin{{{multline}}}` for single equations spanning multiple lines (first line left, last line right)
-- Use `\\begin{{{split}}}` inside `equation` environment for splitting with alignment
+- Use `\\begin{align}` with manual line breaks (`\\\\`) for multi-line equations
+- Use `\\begin{multline}` for single equations spanning multiple lines (first line left, last line right)
+- Use `\\begin{split}` inside `equation` environment for splitting with alignment
 - Insert line breaks (`\\\\`) BEFORE equation exceeds page margin
 - Use `\\notag` on intermediate lines if only labeling the last equation
-- Break LONG fractions using `\\frac{{{numerator}}}``{{{denominator}}}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
+- Break LONG fractions using `\\frac{numerator}``{denominator}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
 - Use `\\displaystyle` only when necessary (it makes equations larger)
 - For integrals/sums with long limits, use `\\limits_{{\\substack{{{line1 \\\\\\\\ line2}}}}}` for multi-line limits
 - Break long equations at logical operators (=, +, -, \\times)
-- Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{{{array}}}...\\end{{{array}}}\\right)`
+- Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{array}...\\end{array}\\right)`
 
 ## CRITICAL - Formula Display Best Practices:
-- Integrate mathematical formulas using correct LaTeX environments: `\\begin{{{align}}}...\\end{{{align}}}`, `\\begin{{{equation}}}...\\end{{{equation}}}`
+- Integrate mathematical formulas using correct LaTeX environments: `\\begin{align}...\\end{align}`, `\\begin{equation}...\\end{equation}`
 - Truncate and wrap long formulas and symbols BEFORE they overflow
 - Use inline math `$$...$$` for short expressions only
 - Use display math `\\[...\\]` or environments for multi-line expressions
@@ -2471,7 +2471,7 @@ $previous_chapters
 ## CRITICAL - Table Overflow Prevention:
 - Use `p{{{width}}` columns (e.g., `p{{{3cm}}` p{{{11cm}}}`) to control column width and prevent overflow
 - Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
-- Wrap entire table in `\\resizebox{{{\\textwidth}}}``{{{!}}}``{{{...}}}`` if table is still too wide (LAST RESORT)
+- For tables that might overflow, wrap entire table in `\resizebox{\textwidth}{!}{...}` as LAST RESORT
 - Use `\\small` or `\\footnotesize` inside table if needed
 - Split notation table into multiple tables if there are too many entries (>30 rows)
 - Consider using `longtable` environment if table spans multiple pages
@@ -2487,7 +2487,7 @@ Example of Table Format:
         \\midrule
         \\( f(x) \\) & description... \\\\
         \\bottomrule
-    \\end{{{tabular}}}
+    \\end{tabular}
     \\caption{{{Table of Notations}}}
     \\label{{{tab:notations}}}
 \\end{{{table}}}
