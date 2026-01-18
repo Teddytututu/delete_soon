@@ -51,7 +51,13 @@ class LatentReporter:
             llm_client: LLM 实例 (用于生成叙述)
             task_id: 任务名称 (例如 2025_C)
         """
-        self.output_dir = Path(output_dir)
+        # [FIX] 强制向上寻址：如果当前在 Workspace 或 Memory 目录，则取其父目录
+        base_path = Path(output_dir)
+        if base_path.name in ["Workspace", "Memory", "Report"]:
+            self.output_dir = base_path.parent
+        else:
+            self.output_dir = base_path
+
         self.report_dir = self.output_dir / "Report"
         self.journal_path = self.report_dir / "01_Research_Journal.md"
         self.llm = llm_client

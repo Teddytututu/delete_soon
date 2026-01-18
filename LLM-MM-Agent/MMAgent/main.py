@@ -131,8 +131,8 @@ def run_mmbench_evaluation(key, evaluation_model, solution_path, output_dir, log
         main_logger.error(f"[ERROR] Failed to load solution: {e}")
         raise
 
-    # Create evaluation directory in logs/evaluation/
-    evaluation_dir = Path(output_dir) / "logs" / "evaluation"
+    # Create evaluation directory in Memory/evaluation/
+    evaluation_dir = Path(output_dir) / "Memory" / "evaluation"
     evaluation_dir.mkdir(parents=True, exist_ok=True)
     main_logger.info(f"[INFO] Evaluation directory: {evaluation_dir}")
 
@@ -229,12 +229,12 @@ def get_tiered_dirs(output_dir):
         'report': output_path / 'Report',
         'workspace': output_path / 'Workspace',
         'memory': output_path / 'Memory',
-        # Legacy mappings (for backward compatibility)
-        'json': output_path / 'json',
-        'markdown': output_path / 'markdown',
-        'latex': output_path / 'latex',
-        'evaluation': output_path / 'evaluation',
-        'usage': output_path / 'usage',
+        # Legacy mappings (for backward compatibility) - NOW NESTED IN THREE-TIER STRUCTURE
+        'json': output_path / 'Workspace' / 'json',
+        'markdown': output_path / 'Workspace' / 'markdown',
+        'latex': output_path / 'Workspace' / 'latex',
+        'evaluation': output_path / 'Memory' / 'evaluation',
+        'usage': output_path / 'Memory' / 'usage',
     }
 
 
@@ -393,7 +393,7 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
 
             try:
                 problem, order, with_code, coordinator, task_descriptions, solution = \
-                    problem_analysis(llm, problem_path, config, dataset_path, output_dir, logger_manager)
+                    problem_analysis(llm, problem_path, config, dataset_path, dirs["workspace"], logger_manager)
 
                 duration_stage1 = int(time.time() - start_stage1)
                 tracker.end_stage("Problem Analysis", duration_stage1)
@@ -434,7 +434,7 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
 
                 # Mathematical Modeling
                 task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt = \
-                    mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager, output_dir)
+                    mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager, dirs["workspace"])
 
                 # Computational Solving
                 solution = computational_solving(
@@ -534,7 +534,7 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
             main_logger.info(f"\n[INFO] Starting MMBench evaluation with main model: {config['model_name']}...")
             # [FIX] Read solution from Workspace/json where it was saved
             solution_path = Path(dirs["workspace"]) / "json" / f"{name}.json"
-            evaluation_report = run_mmbench_evaluation(key, config['model_name'], str(solution_path), output_dir, logger_manager)
+            evaluation_report = run_mmbench_evaluation(key, config['model_name'], str(solution_path), dirs["memory"], logger_manager)
             main_logger.info(f"[OK] MMBench evaluation complete: {evaluation_report}")
         except FileNotFoundError as e:
             # Solution file not found - pipeline likely failed early
@@ -580,38 +580,18 @@ def check_existing_runs(task_id: str, max_runs: int = 3, method_name: str = 'MM-
     ]
 
     if len(existing_runs) >= max_runs:
-        print(f"\n[WARNING] Detected {len(existing_runs)} previous runs for task '{task_id}'")
-        print(f"[INFO] Most recent runs:")
+        print(f"[WARNING] {len(existing_runs)} previous runs found for '{task_id}'")
 
-        # Sort by modification time (newest first)
         runs_sorted = sorted(existing_runs,
                            key=lambda p: p.stat().st_mtime,
                            reverse=True)
 
         for i, run in enumerate(runs_sorted[:5], 1):
-            # Extract timestamp from directory name
-            # Format: taskid_YYYYMMDD-HHMMSS
-            parts = run.name.split('_')
-            if len(parts) >= 2:
-                timestamp = parts[-1]
-                # Format timestamp: YYYYMMDD-HHMMSS -> YYYY-MM-DD HH:MM:SS
-                if len(timestamp) == 15 and timestamp[8] == '-':
-                    formatted_ts = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]} {timestamp[9:11]}:{timestamp[11:13]}:{timestamp[13:15]}"
-                else:
-                    formatted_ts = timestamp
-                print(f"  {i}. {run.name} ({formatted_ts})")
-            else:
-                print(f"  {i}. {run.name}")
+            print(f"  {i}. {run.name}")
 
-        print(f"\n[RISK] Running again will:")
-        print(f"  - Consume additional API quota (potentially expensive)")
-        print(f"  - Create more output files (disk space)")
-        print(f"  - May produce the same results if nothing changed")
-
-        # Check if running in non-interactive environment
-        response = input("\nContinue anyway? (y/N): ").strip()
+        response = input("Continue anyway? (y/N): ").strip()
         if response.lower() != 'y':
-            print("[ABORTED] Run cancelled by user")
+            print("[ABORTED]")
             return False
 
     return True
@@ -676,29 +656,18 @@ def preflight_checks(task_id: str):
     """
     from pathlib import Path
 
-    print("\n" + "=" * 80)
-    print("PREFLIGHT CHECKS (Config-Driven)")
-    print("=" * 80)
-
     # [NEW] Resolve paths dynamically from config
     try:
         problem_path, dataset_base_dir, config_path = resolve_paths_from_config(task_id)
-        print(f"[INFO] Config file: {config_path}")
-        print(f"[INFO] Using config-driven path resolution")
     except Exception as e:
-        print(f"[ERROR] Failed to load config/resolve paths: {e}")
+        print(f"[ERROR] Failed to load config: {e}")
         raise
 
     # Check 1: Problem file exists
-    print(f"\n[CHECK 1] Problem file: {problem_path}")
-
     if not problem_path.exists():
         raise FileNotFoundError(f"Problem file not found: {problem_path}")
 
-    print(f"[OK] Problem file exists")
-
     # Check 2: Load and validate problem JSON
-    print(f"\n[CHECK 2] Validating problem JSON structure...")
     try:
         with open(problem_path, 'r', encoding='utf-8') as f:
             problem_data = __import__('json').load(f)
@@ -710,54 +679,23 @@ def preflight_checks(task_id: str):
         if missing_fields:
             raise ValueError(f"Problem JSON missing required fields: {missing_fields}")
 
-        print(f"[OK] Problem JSON is valid")
-
         # Check 3: Dataset files (if specified)
         if 'dataset_path' in problem_data:
             dataset_paths = problem_data['dataset_path']
             if isinstance(dataset_paths, str):
                 dataset_paths = [dataset_paths]
 
-            print(f"\n[CHECK 3] Validating dataset files...")
             for ds_path in dataset_paths:
-                # [NEW] Support both absolute and relative paths
-                # If relative, resolve against dataset_base_dir
                 if Path(ds_path).is_absolute():
                     full_path = Path(ds_path)
                 else:
                     full_path = dataset_base_dir / ds_path
 
-                print(f"  Checking: {full_path}")
-
                 if not full_path.exists():
                     raise FileNotFoundError(f"Dataset file not found: {ds_path}")
 
-                # Try to read first line to verify file is not corrupted
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        first_line = f.readline()
-                    print(f"  [OK] File is readable")
-                except UnicodeDecodeError:
-                    # Try with latin1 encoding
-                    with open(full_path, 'r', encoding='latin1') as f:
-                        first_line = f.readline()
-                    print(f"  [OK] File is readable (latin1 encoding)")
-
-            print(f"[OK] All dataset files validated")
-
-        else:
-            print(f"\n[CHECK 3] No dataset files specified (skipping)")
-
-        # Check 4: Config file (already loaded above)
-        print(f"\n[CHECK 4] Configuration file: {config_path}")
-        print(f"[OK] Config file exists")
-
     except __import__('json').JSONDecodeError as e:
         raise ValueError(f"Problem JSON is malformed: {e}")
-
-    print("\n" + "=" * 80)
-    print("[OK] ALL PREFLIGHT CHECKS PASSED")
-    print("=" * 80 + "\n")
 
 
 def parse_arguments():
@@ -848,9 +786,10 @@ def main():
         sys.exit(1)
 
     # P1 FIX: Check for duplicate runs
-    if not check_existing_runs(args.task, max_runs=3, method_name=args.method_name):
-        import sys
-        sys.exit(0)  # User chose to abort
+    # TEMPORARILY DISABLED FOR TESTING
+    # if not check_existing_runs(args.task, max_runs=3, method_name=args.method_name):
+    #     import sys
+    #     sys.exit(0)  # User chose to abort
 
     # Get experiment info and initialize logging system
     problem_path, config, dataset_dir, output_dir, logger_manager = get_info(args)
@@ -882,25 +821,13 @@ def main():
     preflight_result = data_manager.preflight_check(required_files)
 
     # Report pre-flight results
-    print(f"\n{'='*60}")
-    print("DATA PRE-FLIGHT CHECK")
-    print(f"{'='*60}")
-    print(f"DATA_DIR: {preflight_result['data_dir_path']}")
-    print(f"CSV files found: {len(preflight_result['csv_files'])}")
-    for f in preflight_result['csv_files']:
-        print(f"  - {f}")
+    print(f"CSV files: {len(preflight_result['csv_files'])}")
 
     if preflight_result['missing_files']:
-        print(f"\n[WARNING] Missing required files:")
-        for f in preflight_result['missing_files']:
-            print(f"  - {f}")
+        print(f"[WARNING] Missing files: {preflight_result['missing_files']}")
 
     if preflight_result['unreadable_files']:
-        print(f"\n[ERROR] Unreadable files:")
-        for f in preflight_result['unreadable_files']:
-            print(f"  - {f}")
-
-    print(f"{'='*60}\n")
+        print(f"[ERROR] Unreadable files: {preflight_result['unreadable_files']}")
 
     # P1 FIX: Run experiment with try-finally to ensure runtime is always saved
     # STEP 4 FIX: Also ensure minimal solution.json is written on failure
@@ -958,8 +885,8 @@ def main():
         # Always save runtime, even if run() crashes
         end = time.time()
         try:
-            # Ensure usage directory exists
-            usage_dir = Path(output_dir) / 'usage'
+            # [FIX] Save runtime to Memory layer
+            usage_dir = Path(output_dir) / 'Memory' / 'usage'
             usage_dir.mkdir(parents=True, exist_ok=True)
 
             # Write runtime

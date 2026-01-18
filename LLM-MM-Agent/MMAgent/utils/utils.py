@@ -124,13 +124,42 @@ def read_json_file(file_path: str) -> Dict:
 
 
 def write_text_file(file_path: str, content: str):
+    """
+    Write content to a text file, creating parent directories if needed.
+
+    [CRITICAL FIX 2026-01-18] Auto-create parent directories to prevent
+    FileNotFoundError when saving results to Workspace/markdown/, etc.
+    """
+    import os
+
+    # [CRITICAL FIX] Automatically create parent directories if they don't exist
+    # This prevents: FileNotFoundError: [Errno 2] No such file or directory: '.../Workspace/markdown/2025_C.md'
+    parent_dir = os.path.dirname(file_path)
+    if parent_dir:  # Only create if there's a parent directory
+        os.makedirs(parent_dir, exist_ok=True)
+
     with open(file_path, 'w', encoding='utf-8') as file:
         file.write(content)
 
 
 def write_json_file(file_path: str, data:dict) -> Dict:
+    """
+    Write data to a JSON file, creating parent directories if needed.
+
+    [CRITICAL FIX 2026-01-18] Auto-create parent directories to prevent
+    FileNotFoundError when saving results to Workspace/json/, etc.
+    """
+    import os
+    import json
+
+    # [CRITICAL FIX] Automatically create parent directories if they don't exist
+    # This prevents: FileNotFoundError: [Errno 2] No such file or directory: '.../Workspace/json/2025_C.json'
+    parent_dir = os.path.dirname(file_path)
+    if parent_dir:  # Only create if there's a parent directory
+        os.makedirs(parent_dir, exist_ok=True)
+
     with open(file_path, "w", encoding="utf-8") as json_file:
-        json_file.write(json.dumps(data, indent=4, ensure_ascii=False))
+        json.dump(data, json_file, indent=4, ensure_ascii=False)
 
 
 def parse_llm_output_to_json(output_text: str) -> dict:
@@ -441,22 +470,18 @@ def get_info(args):
         "Workspace": {
             "code": None,      # Generated Python scripts (main1.py, main2.py, etc.)
             "charts": None,    # Generated visualization images
+            "json": None,      # Structured JSON output
+            "markdown": None,  # Human-readable markdown output
+            "latex": None,     # LaTeX academic paper format
         },
 
         # Tier 3: Memory Layer - State persistence and raw logs
         "Memory": {
-            "logs": None,           # Execution logs (main.log, errors.log, etc.)
-            "debug": None,          # Debug-level logs
+            "logs": None,           # Execution logs (debug.log, trace.jsonl, etc.)
             "checkpoints": None,    # Pipeline state checkpoints
-            "trace_stream": None,   # Raw execution tracker JSONL
+            "usage": None,          # API usage tracking
+            "evaluation": None,     # Evaluation results
         },
-
-        # Legacy folders (for backward compatibility during transition)
-        "json": None,              # Structured JSON output
-        "markdown": None,          # Human-readable markdown output
-        "latex": None,             # LaTeX academic paper format
-        "evaluation": None,        # Evaluation results
-        "usage": None,             # API usage tracking
     }
 
     # Create all directories recursively

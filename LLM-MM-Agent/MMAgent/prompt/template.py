@@ -2373,7 +2373,7 @@ $previous_chapters
 ## CRITICAL - LaTeX Table Overflow Prevention:
 - For ALL tables, use `\begin{tabular}{p{width} p{width} ...}` format instead of `l c r` to control column width
 - Wrap long table cell text using fixed-width p columns (e.g., `p{8cm}`, `p{10cm}`)
-- Use `\\begin{tabularx}``{{{\\textwidth}}}``{X X X ...}}` from tabularx package for automatic width adjustment
+- Use `\\begin{tabularx}{\\textwidth}{X X X ...}` from tabularx package for automatic width adjustment
 - For tables that might overflow, wrap entire table in `\resizebox{\textwidth}{!}{...}` as LAST RESORT
 - Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
 - Keep table column count reasonable (max 6-7 columns for portrait, 8-10 for landscape)
@@ -2388,9 +2388,9 @@ $previous_chapters
 - Use `\\begin{split}` inside `equation` environment for splitting with alignment
 - Insert line breaks (`\\\\`) BEFORE equation exceeds page margin
 - Use `\\notag` on intermediate lines if only labeling the last equation
-- Break LONG fractions using `\\frac{numerator}``{denominator}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
+- Break LONG fractions using `\\frac{numerator}{denominator}` -> `\\frac{\\text{short num}}{\\text{short denom}}`
 - Use `\\displaystyle` only when necessary (it makes equations larger)
-- For integrals/sums with long limits, use `\\limits_{{\\substack{{{line1 \\\\\\\\ line2}}}}}` for multi-line limits
+- For integrals/sums with long limits, use `\\limits_{\\substack{line1 \\\\ line2}}` for multi-line limits
 - Break long equations at logical operators (=, +, -, \\times)
 - Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{array}...\\end{array}\\right)`
 
@@ -2427,7 +2427,7 @@ $previous_chapters
 ## CRITICAL - LaTeX Table Overflow Prevention:
 - For ALL tables, use `\begin{tabular}{p{width} p{width} ...}` format instead of `l c r` to control column width
 - Wrap long table cell text using fixed-width p columns (e.g., `p{8cm}`, `p{10cm}`)
-- Use `\\begin{tabularx}``{{{\\textwidth}}}``{X X X ...}}` from tabularx package for automatic width adjustment
+- Use `\\begin{tabularx}{\\textwidth}{X X X ...}` from tabularx package for automatic width adjustment
 - For tables that might overflow, wrap entire table in `\resizebox{\textwidth}{!}{...}` as LAST RESORT
 - Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
 - Keep table column count reasonable (max 6-7 columns for portrait, 8-10 for landscape)
@@ -2442,9 +2442,9 @@ $previous_chapters
 - Use `\\begin{split}` inside `equation` environment for splitting with alignment
 - Insert line breaks (`\\\\`) BEFORE equation exceeds page margin
 - Use `\\notag` on intermediate lines if only labeling the last equation
-- Break LONG fractions using `\\frac{numerator}``{denominator}` -> `\\frac{{{\\text{{{short num}}}}}``{{{\\text{{{short denom}}}}}`
+- Break LONG fractions using `\\frac{numerator}{denominator}` -> `\\frac{\\text{short num}}{\\text{short denom}}`
 - Use `\\displaystyle` only when necessary (it makes equations larger)
-- For integrals/sums with long limits, use `\\limits_{{\\substack{{{line1 \\\\\\\\ line2}}}}}` for multi-line limits
+- For integrals/sums with long limits, use `\\limits_{\\substack{line1 \\\\ line2}}` for multi-line limits
 - Break long equations at logical operators (=, +, -, \\times)
 - Use matrix environments (pmatrix, bmatrix) instead of `\\left(\\begin{array}...\\end{array}\\right)`
 
@@ -2469,7 +2469,7 @@ $previous_chapters
 </paper>
 
 ## CRITICAL - Table Overflow Prevention:
-- Use `p{{{width}}` columns (e.g., `p{{{3cm}}` p{{{11cm}}}`) to control column width and prevent overflow
+- Use `p{width} columns (e.g., p{3cm} p{11cm}) to control column width and prevent overflow
 - Use `\\raggedright\\arraybackslash` in p columns to prevent text overflow
 - For tables that might overflow, wrap entire table in `\resizebox{\textwidth}{!}{...}` as LAST RESORT
 - Use `\\small` or `\\footnotesize` inside table if needed
@@ -2478,19 +2478,19 @@ $previous_chapters
 
 Example of Table Format:
 ```latex
-\\begin{{{table}}}[H]
+\\begin{table}[H]
     \\centering
-    \\renewcommand{{{\\arraystretch}}}``{{1.3}}`
-    \\begin{{{tabular}}}``{{{>{{\\raggedright\\arraybackslash}}p{{{3cm}}}`>{{\\raggedright\\arraybackslash}}p{{{11cm}}}}}`
+    \\renewcommand{\\arraystretch}{1.3}
+    \\begin{tabular}{>\\raggedright\\arraybackslash p{3cm}>{\\raggedright\\arraybackslash p{11cm}}
         \\toprule
-        \\textbf{{{Notation}}} & \\textbf{{{Description}}} \\\\
+        \\textbf{Notation} & \\textbf{Description} \\\\
         \\midrule
         \\( f(x) \\) & description... \\\\
         \\bottomrule
     \\end{tabular}
-    \\caption{{{Table of Notations}}}
-    \\label{{{tab:notations}}}
-\\end{{{table}}}
+    \\caption{Table of Notations}
+    \\label{tab:notations}
+\\end{table}
 ```
 
 Response only latex table content, do not include headlines and anything else.

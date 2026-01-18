@@ -1286,18 +1286,20 @@ def generate_paper(llm, output_dir, name):
         "year": name.split('_')[0],
         "problem_type": name.split('_')[1]
     }
-    json_file_path = f"{output_dir}/json/{name}.json"
+    # [FIX] Use Workspace/json instead of root json/
+    json_file_path = f"{output_dir}/Workspace/json/{name}.json"
 
-    # CRITICAL FIX: Charts are saved to output_dir/charts/ NOT output_dir/code/
-    # create_charts.py saves images to: output_dir/charts/chart_*.png
+    # CRITICAL FIX: Charts are saved to Workspace/charts/ NOT Workspace/code/
+    # create_charts.py saves images to: Workspace/charts/chart_*.png
     # LaTeX needs relative paths from latex/ directory
     # CRITICAL FIX 2: Use pathlib.Path for cross-platform compatibility
     from pathlib import Path
 
     output_path = Path(output_dir)
-    code_dir = output_path / 'code'
-    charts_dir = output_path / 'charts'
-    latex_dir = output_path / 'latex'
+    workspace_dir = output_path / 'Workspace'
+    code_dir = workspace_dir / 'code'
+    charts_dir = workspace_dir / 'charts'
+    latex_dir = workspace_dir / 'latex'
 
     # Collect chart images with relative paths for LaTeX compilation
     metadata['figures'] = []
@@ -1364,6 +1366,6 @@ def generate_paper(llm, output_dir, name):
 
     json_data['tasks'] = json_data['tasks'][:]
 
-    # Generate paper with chapter relevance mapping
-    generate_paper_from_json(llm, json_data, metadata, f"{output_dir}/latex", 'solution')
+    # [FIX] Generate paper in Workspace/latex instead of root latex/
+    generate_paper_from_json(llm, json_data, metadata, f"{output_dir}/Workspace/latex", 'solution')
 

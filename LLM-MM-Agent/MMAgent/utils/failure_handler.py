@@ -39,7 +39,8 @@ class FailureHandler:
         """
         self.output_dir = Path(output_dir)
         self.problem_id = problem_id
-        self.json_dir = self.output_dir / 'json'
+        # [FIX] Save JSON to Workspace/json instead of root json/
+        self.json_dir = self.output_dir / 'Workspace' / 'json'
         self.json_dir.mkdir(parents=True, exist_ok=True)
 
         # Path to solution JSON

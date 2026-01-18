@@ -397,16 +397,21 @@ class AutoEvaluator:
 
         # Check for report files
         # CRITICAL FIX: Support both {problem_id}.md (current) and solution.md (legacy)
-        markdown_path = self.output_dir / "markdown" / f"{self.problem_id}.md"
-        markdown_path_alt = self.output_dir / "markdown" / "solution.md"
-        latex_path = self.output_dir / "latex" / f"{self.problem_id}.tex"
-        latex_path_alt = self.output_dir / "latex" / "solution.tex"
+        # [FIXED] Now looking in Workspace/ subdirectory (three-tier architecture)
+        markdown_path = self.output_dir / "Workspace" / "markdown" / f"{self.problem_id}.md"
+        markdown_path_alt = self.output_dir / "Workspace" / "markdown" / "solution.md"
+        latex_path = self.output_dir / "Workspace" / "latex" / f"{self.problem_id}.tex"
+        latex_path_alt = self.output_dir / "Workspace" / "latex" / "solution.tex"
 
-        if markdown_path.exists() or markdown_path_alt.exists():
+        # Legacy paths for backward compatibility (check root level too)
+        markdown_path_legacy = self.output_dir / "markdown" / f"{self.problem_id}.md"
+        latex_path_legacy = self.output_dir / "latex" / f"{self.problem_id}.tex"
+
+        if markdown_path.exists() or markdown_path_alt.exists() or markdown_path_legacy.exists():
             stage_result['quality_score'] += 0.4
             stage_result['strengths'].append('Markdown report generated')
 
-        if latex_path.exists() or latex_path_alt.exists():
+        if latex_path.exists() or latex_path_alt.exists() or latex_path_legacy.exists():
             stage_result['quality_score'] += 0.4
             stage_result['strengths'].append('LaTeX report generated')
 
@@ -416,7 +421,9 @@ class AutoEvaluator:
             stage_result['strengths'].append('Includes conclusion/discussion')
 
         # Check for problems with absolute path evidence
-        if not markdown_path.exists() and not markdown_path_alt.exists() and not latex_path.exists() and not latex_path_alt.exists():
+        has_markdown = markdown_path.exists() or markdown_path_alt.exists() or markdown_path_legacy.exists()
+        has_latex = latex_path.exists() or latex_path_alt.exists() or latex_path_legacy.exists()
+        if not has_markdown and not has_latex:
             stage_result['problems'].append({
                 'category': 'Completeness',
                 'severity': 'HIGH',

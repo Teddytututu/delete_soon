@@ -55,6 +55,14 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     workspace_dir = os.path.join(output_dir, "Workspace")
     os.makedirs(workspace_dir, exist_ok=True)
 
+    # [FIX] Create Workspace subdirectories: code, json, charts
+    work_dir = os.path.join(workspace_dir, 'code')
+    json_dir = os.path.join(workspace_dir, 'json')
+    charts_dir = os.path.join(workspace_dir, 'charts')
+
+    for d in [work_dir, json_dir, charts_dir]:
+        os.makedirs(d, exist_ok=True)
+
     # CRITICAL FIX: Pass logger_manager to agents for proper error logging to errors.log
     # LATENT REPORTER INTEGRATION: Pass output_dir and task_id for LLM-powered narrative logging
     ts = TaskSolver(llm, logger_manager, output_dir=output_dir, task_id=str(task_id))
@@ -68,8 +76,7 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     if not code_template_path.exists():
         raise FileNotFoundError(f"Code template not found: {code_template_path}")
 
-    # [NEW] Three-tier structure: code goes to Workspace/code
-    work_dir = os.path.join(output_dir, 'Workspace', 'code')
+    # [FIX] work_dir is already defined above as Workspace/code
     script_name = 'main{}.py'.format(task_id)
     save_path = os.path.join(work_dir, script_name)
 
@@ -331,6 +338,25 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
         # dataset_dir is the actual directory path like 'MMBench/dataset/2000_C'
         # coding() expects a string path for data_file parameter
         data_path_for_coding = str(dataset_dir) if dataset_dir else "."
+
+        # [CRITICAL FIX 2026-01-18] Inject absolute dataset path to prevent FileNotFoundError
+        # Problem: LLM generates code with relative paths like pd.read_csv('clean_athletes.csv')
+        # Issue: Script runs in Workspace/code/ but data is in MMBench/dataset/2025_C/
+        # Solution: Force inject absolute path into prompt to tell LLM where data actually is
+        abs_dataset_dir = os.path.abspath(dataset_dir).replace('\\', '/')
+        path_instruction = (
+            f"\n\n[IMPORTANT] DATA FILE LOCATION:\n"
+            f"The CSV files are located in this absolute directory: r'{abs_dataset_dir}'\n"
+            f"You MUST use os.path.join(r'{abs_dataset_dir}', filename) to read files.\n"
+            f"DO NOT assume files are in the current directory.\n"
+            f"DO NOT use relative paths like pd.read_csv('filename.csv').\n"
+            f"Example: df = pd.read_csv(os.path.join(r'{abs_dataset_dir}', 'clean_athletes.csv'))\n"
+        )
+
+        # Append path instruction to user_prompt (data_columns_info)
+        if not data_columns_info:
+            data_columns_info = ""
+        data_columns_info += path_instruction
 
         # CRITICAL FIX [2026-01-18]: Ensure data_description is a string
         # problem['data_description'] in JSON is often a dict, which can cause

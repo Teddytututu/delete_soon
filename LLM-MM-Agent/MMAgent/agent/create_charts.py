@@ -1499,11 +1499,16 @@ class ChartCreator(BaseAgent):
                 # But ONLY inside arrowprops or dict to avoid false positives
 
                 # Apply to arrowprops specifically (most common error location)
-                code_str = re.sub(
-                    r"(arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?)(['\"])([\w\-\.]+)\2\s+(['\"])([\w\-\.]+)\3",
-                    r"\1\2\4, \5\6",
-                    code_str
-                )
+                # [CRITICAL FIX 2026-01-18] Wrap in try-except to prevent regex errors from crashing chart generation
+                try:
+                    code_str = re.sub(
+                        r"(arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?)(['\"])([\w\-\.]+)\2\s+(['\"])([\w\-\.]+)\3",
+                        r"\1\2, \3\4, \5",
+                        code_str
+                    )
+                except re.error as e:
+                    # If regex fails (e.g., invalid group reference), skip this replacement
+                    logger.debug(f"[FIX] Regex substitution failed (arrowprops comma fix): {e}")
 
                 # Fix 2: Missing comma before numeric parameters in dict
                 # Pattern: dict(key='value' number=...) → dict(key='value', number=...)
@@ -1515,17 +1520,25 @@ class ChartCreator(BaseAgent):
                     (r"(edgecolor\s*=\s*['\"][^'\"]+['\"])\s+(linewidth\s*=)", r"\1, \2"),
                 ]
 
+                # [CRITICAL FIX 2026-01-18] Wrap all regex substitutions in try-except
                 for pattern, replacement in arrowprops_patterns:
-                    code_str = re.sub(pattern, replacement, code_str)
+                    try:
+                        code_str = re.sub(pattern, replacement, code_str)
+                    except re.error as e:
+                        logger.debug(f"[FIX] Regex substitution failed (numeric params): {e}")
 
                 # Fix 3: More general - missing comma in any dict(...) call
                 # Pattern: dict(word'word2' or dict("word""word2") → dict("word", "word2")
                 # This is conservative - only fixes obvious cases
-                code_str = re.sub(
-                    r"dict\(([^)]*?)(['\"])([a-zA-Z_][a-zA-Z0-9_]*)\2\s+([a-zA-Z_][a-zA-Z0-9_]*)\3",
-                    r"dict(\1\2\3\2, \4\3",
-                    code_str
-                )
+                # [CRITICAL FIX 2026-01-18] Wrap in try-except
+                try:
+                    code_str = re.sub(
+                        r"dict\(([^)]*?)(['\"])([a-zA-Z_][a-zA-Z0-9_]*)\2\s+([a-zA-Z_][a-zA-Z0-9_]*)\2",
+                        r"dict(\1\2\3\2, \4\2",
+                        code_str
+                    )
+                except re.error as e:
+                    logger.debug(f"[FIX] Regex substitution failed (dict comma fix): {e}")
 
                 logger.debug(f"[P0 FIX #3] Applied missing comma fixes")
                 # ======== END P0 FIX #3 ========
@@ -1536,33 +1549,57 @@ class ChartCreator(BaseAgent):
 
                 # Fix 1: Remove 'shrink' from arrowprops dictionaries only
                 # Pattern: arrowprops=dict(..., shrink=A, ...) or arrowprops={'shrink': A, ...}
-                code_str = re.sub(
-                    r"arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?shrink\s*=\s*[0-9.]+[^)}]*?(?:\)|\})",
-                    lambda m: re.sub(r",?\s*shrink\s*=\s*[0-9.]+\s*,?", "", m.group(0)),
-                    code_str
-                )
+                # [CRITICAL FIX 2026-01-18] Wrap in try-except
+                try:
+                    code_str = re.sub(
+                        r"arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?shrink\s*=\s*[0-9.]+[^)}]*?(?:\)|\})",
+                        lambda m: re.sub(r",?\s*shrink\s*=\s*[0-9.]+\s*,?", "", m.group(0)),
+                        code_str
+                    )
+                except re.error as e:
+                    logger.debug(f"[FIX] Regex substitution failed (shrink removal): {e}")
 
                 # Fix 2: Remove 'fancybox' from arrowprops (deprecated in some versions)
-                code_str = re.sub(
-                    r"arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?fancybox\s*=\s*(?:True|False)[^)}]*?(?:\)|\})",
-                    lambda m: re.sub(r",?\s*fancybox\s*=\s*(?:True|False)\s*,?", "", m.group(0)),
-                    code_str
-                )
+                # [CRITICAL FIX 2026-01-18] Wrap in try-except
+                try:
+                    code_str = re.sub(
+                        r"arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?fancybox\s*=\s*(?:True|False)[^)}]*?(?:\)|\})",
+                        lambda m: re.sub(r",?\s*fancybox\s*=\s*(?:True|False)\s*,?", "", m.group(0)),
+                        code_str
+                    )
+                except re.error as e:
+                    logger.debug(f"[FIX] Regex substitution failed (fancybox removal): {e}")
 
                 # Fix 3: Remove 'patchA' and 'patchB' from arrowprops (can cause issues in some versions)
-                code_str = re.sub(
-                    r"arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?(?:patchA|patchB)\s*=\s*[^,)]+[^)}]*?(?:\)|\})",
-                    lambda m: re.sub(r",?\s*(?:patchA|patchB)\s*=\s*[^,)]+\s*,?", "", m.group(0)),
-                    code_str
-                )
+                # [CRITICAL FIX 2026-01-18] Wrap in try-except
+                try:
+                    code_str = re.sub(
+                        r"arrowprops\s*=\s*(?:dict\(|\{)[^)}]*?(?:patchA|patchB)\s*=\s*[^,)]+[^)}]*?(?:\)|\})",
+                        lambda m: re.sub(r",?\s*(?:patchA|patchB)\s*=\s*[^,)]+\s*,?", "", m.group(0)),
+                        code_str
+                    )
+                except re.error as e:
+                    logger.debug(f"[FIX] Regex substitution failed (patchA/B removal): {e}")
 
                 # Fix double commas in arrowprops dict after removal
-                code_str = re.sub(r',\s*,', ',', code_str)
-                code_str = re.sub(r'\{\s*,', '{', code_str)
-                code_str = re.sub(r',\s*\}', '}', code_str)
-                # Fix leftover commas before closing parentheses/brackets
-                code_str = re.sub(r',\s*\)', ')', code_str)
-                code_str = re.sub(r',\s*\]', ']', code_str)
+                # [CRITICAL FIX 2026-01-18] Wrap all in try-except
+                comma_fix_patterns = [
+                    (r',\s*,', ','),
+                    (r'\{\s*,', '{'),
+                    (r',\s*\}', '}'),
+                    (r',\s*\)', ')'),
+                ]
+                for pattern, replacement in comma_fix_patterns:
+                    try:
+                        code_str = re.sub(pattern, replacement, code_str)
+                    except re.error as e:
+                        logger.debug(f"[FIX] Regex substitution failed (comma cleanup): {e}")
+
+                # [CRITICAL FIX 2026-01-18] Wrap last re.sub in try-except
+                try:
+                    code_str = re.sub(r',\s*\]', ']', code_str)
+                except re.error as e:
+                    logger.debug(f"[FIX] Regex substitution failed (bracket cleanup): {e}")
 
                 return code_str
 
@@ -2082,15 +2119,24 @@ plt.savefig(save_path'''
                 )
 
             # Save original __import__ and block it
-            original_import = __builtins__.__import__
-            __builtins__.__import__ = _blocked_import
+            # [CRITICAL FIX 2026-01-18] Handle __builtins__ as both module and dict
+            # In some Python environments (especially exec sandbox), __builtins__ is a dict
+            if isinstance(__builtins__, dict):
+                original_import = __builtins__['__import__']
+                __builtins__['__import__'] = _blocked_import
+            else:
+                original_import = __builtins__.__import__
+                __builtins__.__import__ = _blocked_import
 
             try:
                 # Execute the code with restricted namespace and validated imports
                 exec(code, namespace)
             finally:
                 # Restore original __import__ (important for system stability)
-                __builtins__.__import__ = original_import
+                if isinstance(__builtins__, dict):
+                    __builtins__['__import__'] = original_import
+                else:
+                    __builtins__.__import__ = original_import
 
             # Step 4 (continued): 调用finalize_plot作为安全网（用户要求）
             # 即使代码执行了，也要确保文件一定落盘
