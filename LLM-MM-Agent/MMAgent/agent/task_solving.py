@@ -486,32 +486,6 @@ class TaskSolver(BaseAgent):
         self.code_history = {}  # Maps task_id -> list of (iteration, code) tuples
         self.error_history = {}  # Maps task_id -> list of (iteration, error_type, error_message) tuples
 
-    def execute_script(self, script_path: str, work_dir: str, timeout: int = None):
-        """
-        Execute a Python script using SecureScriptExecutor.
-
-        This method wraps SecureScriptExecutor to return a tuple (is_pass, output)
-        instead of raising exceptions, making it compatible with the coding() method.
-
-        Args:
-            script_path: Path to the Python script to execute
-            work_dir: Working directory for execution
-            timeout: Maximum execution time in seconds (None = use default 300s)
-
-        Returns:
-            tuple: (is_pass, output)
-                - is_pass (bool): True if execution succeeded, False otherwise
-                - output (str): Execution output on success, error message on failure
-        """
-        try:
-            executor = SecureScriptExecutor(logger_manager=self.logger_manager)
-            output = executor.execute(script_path, work_dir, timeout=timeout)
-            return True, output
-        except EnvException as e:
-            return False, str(e)
-        except Exception as e:
-            return False, f"Unexpected error during script execution: {e}"
-
     def analysis(self, prompt: str, task_description: str, user_prompt: str = ''):
         """Generate task analysis using streamlined prompt with base system prompt."""
         user_msg = safe_format(TASK_ANALYSIS_PROMPT_V2,
@@ -547,11 +521,11 @@ class TaskSolver(BaseAgent):
             formulas_critique = self.formulas_critic(data_summary, task_description, task_analysis, formulas)
             formulas = self.formulas_improvement(data_summary, task_description, task_analysis, formulas, formulas_critique, user_prompt)
         
-        modeling_method = self.modeling_actor(modeling_prompt, data_summary, task_description, task_analysis, formulas, user_prompt)
+        modeling_method = self.modeling_actor(modeling_prompt, data_summary, task_description, task_analysis, formulas, modeling_methods, user_prompt)
     
         return formulas, modeling_method
 
-    def modeling_actor(self, prompt: str, data_summary: str, task_description: str, task_analysis: str, formulas: str, user_prompt: str = ''):
+    def modeling_actor(self, prompt: str, data_summary: str, task_description: str, task_analysis: str, formulas: str, modeling_methods: str = '', user_prompt: str = ''):
         """Generate mathematical modeling approach using streamlined prompt with base system prompt."""
         user_msg = safe_format(TASK_MODELING_PROMPT_V2,
                              prompt=prompt,
@@ -559,6 +533,7 @@ class TaskSolver(BaseAgent):
                              task_description=task_description,
                              task_analysis=task_analysis,
                              modeling_formulas=formulas,
+                             modeling_methods=modeling_methods,
                              user_prompt=user_prompt).strip()
         # [NEW] Pass BASE_SYSTEM_PROMPT as system parameter
         return self.llm.generate(prompt=user_msg, system=BASE_SYSTEM_PROMPT)
@@ -1027,6 +1002,51 @@ class TaskSolver(BaseAgent):
             new_observation = error_msg  # CRITICAL: Ensure observation is always assigned
 
         return new_content, new_observation
+
+    # ========================================================================
+    # [FIX] Missing Helper Method for Smart Coding Loop
+    # ========================================================================
+    def execute_script(self, script_name, work_dir):
+        """
+        Helper method to execute script and return (is_pass, output).
+        Used by the smart coding loop (CRITICAL FIX #8).
+
+        Args:
+            script_name: Name of the script to execute (e.g., 'main1.py')
+            work_dir: Directory containing the script
+
+        Returns:
+            (is_pass, output): Boolean success flag and execution output string
+        """
+        try:
+            # Initialize the secure executor
+            executor = SecureScriptExecutor(logger_manager=self.logger_manager)
+
+            # execute() returns a string observation containing stdout or stderr
+            observation = executor.execute(script_name, work_dir)
+
+            # Heuristic: Determine success/failure based on output content
+            # SecureScriptExecutor logic: if return_code != 0, it returns stderr.
+            # Python scripts usually print "Traceback" to stderr on failure.
+            if "Traceback (most recent call last):" in observation:
+                return False, observation
+
+            # Check for timeout or other environment exceptions captured in the string
+            if "Script execution timed out" in observation:
+                return False, observation
+
+            # If no obvious error patterns, assume success
+            return True, observation
+
+        except EnvException as e:
+            # Handle timeout or validation errors explicitly raised by executor
+            return False, f"Execution Environment Error: {str(e)}"
+        except Exception as e:
+            # Handle unexpected internal errors
+            error_msg = f"Internal Execution Error: {str(e)}"
+            if self.logger:
+                self.logger.error(error_msg)
+            return False, error_msg
 
     # ========================================================================
     # CRITICAL FIX #8: Smart Error Analysis for Nested Retry Elimination
