@@ -13,20 +13,24 @@ pypandoc>=1.10
 # Security
 bcrypt>=4.0.0
 
-# Scientific computing (PyMC3 3.11.6 compatibility)
-numpy>=1.22.0,<1.22.2
-scipy>=1.7.3,<1.8.0
-pandas>=2.0.0,<2.1.0
-pyarrow>=5.0.0,<6.0.0
+# Scientific computing (Updated for Python 3.10+ and Pandas 2.x compatibility)
+# [FIX 2026-01-18] Relaxed numpy constraints for better compatibility
+numpy>=1.24.0,<2.0.0
+scipy>=1.10.0,<2.0.0
+pandas>=2.0.0,<2.2.0
+pyarrow>=12.0.0,<15.0.0
 
 # Machine Learning
-torch>=2.0.0,<2.7.0
-torchvision>=0.15.0
+torch>=2.0.0,<2.4.0
+torchvision>=0.15.0,<0.18.0
 sentence-transformers>=2.0.0
 transformers>=4.40.0,<5.0.0
 
 # Mathematical modeling
-pymc3==3.11.6
+# [FIX 2026-01-18] PyMC3 is deprecated and causes installation issues
+# Consider migrating to PyMC v5, but commented out to avoid install failures
+# pymc3==3.11.6  # DEPRECATED - Causes pip install failures
+# pymc>=5.0.0  # Alternative if migration is feasible
 hmmlearn>=0.2.0,<1.0.0
 pmdarima>=2.0.0,<3.0.0
 scikit-image>=0.19.0,<1.0.0
