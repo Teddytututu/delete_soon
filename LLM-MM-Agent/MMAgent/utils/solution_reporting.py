@@ -58,77 +58,94 @@ def safe_template_substitute(template_str: str, **kwargs: str) -> str:
 # CRITICAL FIX: JSON Sanitization for Stage 4
 # --------------------------------
 
+def escape_latex_special_chars(text: str) -> str:
+    """
+    [CORE DEFENSE FUNCTION] Convert plain text to LaTeX-safe text.
+    Covers ALL LaTeX special characters, not just braces.
+
+    This prevents LaTeX compilation errors from characters like:
+    - % (comment character)
+    - $ (math mode)
+    - & (table separator)
+    - # (parameter)
+    - _ (subscript)
+    - ^ (superscript)
+    - ~ (non-breakable space)
+    - \ (line break)
+    - { } (grouping)
+    """
+    if not isinstance(text, str):
+        return str(text)
+
+    # Remove markdown code blocks first (they don't belong in LaTeX)
+    text = re.sub(r'```[a-zA-Z]*', '', text)
+    text = text.replace('```', '')
+
+    # Complete LaTeX escape mapping
+    latex_escapes = {
+        '&': r'\&',
+        '%': r'\%',
+        '$': r'\$',
+        '#': r'\#',
+        '_': r'\_',
+        '{': r'\{',
+        '}': r'\}',
+        '~': r'\textasciitilde{}',
+        '^': r'\textasciicircum{}',
+        '\\': r'\textbackslash{}',
+    }
+
+    # Use regex for single-pass replacement (more efficient, prevents recursive replacement)
+    import re
+    regex = re.compile('|'.join(re.escape(key) for key in latex_escapes.keys()))
+
+    def replace_match(match):
+        return latex_escapes[match.group()]
+
+    return regex.sub(replace_match, text)
+
+
 def sanitize_json_for_latex(json_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     CRITICAL FIX: Sanitize JSON data to prevent LaTeX compilation errors.
 
+    This is the LAST LINE OF DEFENSE before PDF generation.
+    Recursively traverses JSON structure and escapes ALL LaTeX special characters.
+
     Common issues from LLM-generated JSON:
-    1. Unescaped braces in strings: "value: {something}"
+    1. Unescaped special characters: "Accuracy & Precision were > 95% due to parameter_tuning"
     2. Markdown code blocks in values
     3. Invalid UTF-8 characters
     4. Missing required fields
-
-    This function cleans these issues BEFORE LaTeX generation.
     """
-    def sanitize_string(value: str) -> str:
-        """Recursively sanitize strings to remove problematic characters."""
-        if not isinstance(value, str):
+    def sanitize_value(value):
+        if isinstance(value, str):
+            # Remove markdown code blocks
+            value = re.sub(r'```[a-zA-Z]*', '', value)
+            value = value.replace('```', '')
+
+            # Execute FULL character escaping
+            return escape_latex_special_chars(value.strip())
+
+        elif isinstance(value, dict):
+            return {k: sanitize_value(v) for k, v in value.items()}
+
+        elif isinstance(value, list):
+            return [sanitize_value(v) for v in value]
+
+        else:
             return value
 
-        # Remove markdown code blocks
-        value = re.sub(r'```.*?```', '', value, flags=re.DOTALL)
-
-        # Escape braces that are not part of LaTeX commands
-        # But preserve intentional LaTeX like \textbf{}
-        # Simple heuristic: escape { and } unless they're part of \ command
-        parts = []
-        i = 0
-        while i < len(value):
-            if value[i] == '{':
-                # Check if it's part of a LaTeX command
-                if i > 0 and value[i-1] == '\\':
-                    parts.append(value[i])
-                else:
-                    parts.append('\\{')
-            elif value[i] == '}':
-                if i > 0 and value[i-1] == '\\':
-                    parts.append(value[i])
-                else:
-                    parts.append('\\}')
-            else:
-                parts.append(value[i])
-            i += 1
-
-        return ''.join(parts)
-
-    def sanitize_dict(data: Dict) -> Dict:
-        """Recursively sanitize dictionary."""
-        cleaned = {}
-        for key, value in data.items():
-            # Clean key names
-            clean_key = str(key).strip()
-
-            # Remove problematic characters from keys
-            clean_key = clean_key.replace('{', '').replace('}', '').replace('\n', ' ').replace('\r', '')
-
-            if isinstance(value, dict):
-                cleaned[clean_key] = sanitize_dict(value)
-            elif isinstance(value, list):
-                cleaned[clean_key] = [sanitize_string(v) if isinstance(v, str) else v for v in value]
-            elif isinstance(value, str):
-                cleaned[clean_key] = sanitize_string(value)
-            else:
-                cleaned[clean_key] = value
-
-        return cleaned
-
-    # Apply sanitization
     try:
-        cleaned_json = sanitize_dict(json_data)
-        return cleaned_json
+        # Deep copy to avoid modifying original runtime JSON object
+        import copy
+        safe_data = copy.deepcopy(json_data)
+        return sanitize_value(safe_data)
+
     except Exception as e:
-        print(f"[ERROR] Failed to sanitize JSON: {e}")
-        # Return original if sanitization fails
+        print(f"[ERROR] JSON sanitization failed: {e}")
+        # If sanitization fails, return original to avoid breaking pipeline
+        # Note: This may cause LaTeX compilation to fail, but at least preserves JSON
         return json_data
 
 
@@ -1281,25 +1298,41 @@ def generate_paper_from_json(llm, json_data: dict, info: dict, output_dir: str, 
 
 
 def generate_paper(llm, output_dir, name):
+    from pathlib import Path  # [FIX] 引入 Path 以处理路径逻辑
+
     metadata = {
         "team": "Agent",
         "year": name.split('_')[0],
         "problem_type": name.split('_')[1]
     }
-    # [FIX] Use Workspace/json instead of root json/
-    json_file_path = f"{output_dir}/Workspace/json/{name}.json"
 
-    # CRITICAL FIX: Charts are saved to Workspace/charts/ NOT Workspace/code/
-    # create_charts.py saves images to: Workspace/charts/chart_*.png
-    # LaTeX needs relative paths from latex/ directory
-    # CRITICAL FIX 2: Use pathlib.Path for cross-platform compatibility
+    # =========================================================================
+    # [CRITICAL FIX] 智能路径处理，防止 Workspace 重复嵌套
+    # =========================================================================
     from pathlib import Path
+    out_path = Path(output_dir).resolve()
 
-    output_path = Path(output_dir)
-    workspace_dir = output_path / 'Workspace'
+    print(f"[DEBUG] Raw output_dir received: {out_path}")
+
+    # 检查 output_dir 是否已经指向了 Workspace 目录（大小写不敏感，兼容Windows）
+    if out_path.name.lower() == 'workspace':
+        workspace_dir = out_path
+        # 如果 output_dir 就是 Workspace，那 output_path 的父级才是根目录 (用于日志等)
+        output_path = out_path.parent
+    else:
+        workspace_dir = out_path / 'Workspace'
+
+    # 基于确认好的 workspace_dir 构建所有子路径
+    json_file_path = workspace_dir / 'json' / f"{name}.json"
     code_dir = workspace_dir / 'code'
     charts_dir = workspace_dir / 'charts'
     latex_dir = workspace_dir / 'latex'
+
+    print(f"[INFO] Path resolution:")
+    print(f"  - Output Dir: {output_dir}")
+    print(f"  - Workspace:  {workspace_dir}")
+    print(f"  - JSON Path:  {json_file_path}")
+    # =========================================================================
 
     # Collect chart images with relative paths for LaTeX compilation
     metadata['figures'] = []
@@ -1308,14 +1341,28 @@ def generate_paper(llm, output_dir, name):
     if charts_dir.is_dir():
         for f in charts_dir.iterdir():
             if f.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                # Make path relative to latex/ directory for pdflatex
-                # CRITICAL: Use as_posix() to ensure forward slashes for LaTeX
-                fig_rel = str(f.relative_to(latex_dir).as_posix())
+                try:
+                    # Try to make path relative to latex/ directory
+                    # CRITICAL: Use as_posix() to ensure forward slashes for LaTeX
+                    fig_rel = f.relative_to(latex_dir).as_posix()
+                except ValueError:
+                    # If charts are not under latex_dir (usually they're in charts/)
+                    # Calculate relative path like ../charts/xxx.png
+                    try:
+                        fig_rel = os.path.relpath(str(f), str(latex_dir)).replace(os.sep, '/')
+                    except Exception:
+                        # Last resort: use absolute path (higher risk in LaTeX)
+                        fig_rel = f.as_posix()
                 metadata['figures'].append(fig_rel)
 
     # CRITICAL FIX: Check for failed charts and log them
     # Read the JSON solution to check which charts failed
     try:
+        # 使用修复后的 json_file_path 读取
+        if not json_file_path.exists():
+             print(f"[ERROR] JSON solution file not found at: {json_file_path}")
+             return
+
         with open(json_file_path, 'r', encoding='utf-8') as f:
             json_data = json.loads(f.read())
 
@@ -1366,6 +1413,6 @@ def generate_paper(llm, output_dir, name):
 
     json_data['tasks'] = json_data['tasks'][:]
 
-    # [FIX] Generate paper in Workspace/latex instead of root latex/
-    generate_paper_from_json(llm, json_data, metadata, f"{output_dir}/Workspace/latex", 'solution')
+    # [FIX] Generate paper in Workspace/latex (using the correctly resolved path)
+    generate_paper_from_json(llm, json_data, metadata, str(latex_dir), 'solution')
 

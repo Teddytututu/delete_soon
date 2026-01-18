@@ -139,7 +139,7 @@ The dependencies for this task are analyzed as follows: {dependency_analysis_tex
     return task_analysis_prompt, task_formulas_prompt, task_modeling_prompt, dependent_file_prompt
 
 
-def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager=None, output_dir=None):
+def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager=None, output_dir=None, latent_reporter=None):
     """
     Perform mathematical modeling for a specific task.
 
@@ -153,6 +153,7 @@ def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coor
         with_code: Whether code execution is involved
         logger_manager: Optional MMExperimentLogger for structured logging
         output_dir: Optional output directory path for LatentReporter integration
+        latent_reporter: Optional LatentReporter for LLM-powered narrative logging
 
     Returns:
         Tuple of (task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt)
@@ -160,6 +161,10 @@ def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coor
     # Log modeling start
     if logger_manager:
         logger_manager.log_progress(f"Task {task_id}: Mathematical Modeling", level='info')
+
+    # [FIX] Log to LatentReporter
+    if latent_reporter:
+        latent_reporter.log_thought(f"Task {task_id} - Mathematical Modeling", f"Starting mathematical modeling for task {task_id}. Will retrieve relevant methods and derive formulas.", "INFO")
 
     # CRITICAL FIX: Pass logger_manager to TaskSolver for proper error logging to errors.log
     # LATENT REPORTER INTEGRATION: Pass output_dir and task_id for LLM-powered narrative logging
@@ -176,15 +181,62 @@ def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coor
             logger_manager.log_progress(f"[WARNING] Task {task_id} ID out of range (1-{len(task_descriptions)}), using generic description", level='warning')
         task_description = f"Task {task_id}: Mathematical modeling and computational analysis"
 
+    if latent_reporter:
+        latent_reporter.log_thought(f"Task {task_id} - Analysis", "Analyzing task requirements and exploring mathematical approaches", "INFO")
+
     task_analysis = ts.analysis(task_analysis_prompt, task_description)
-    
+
     # Hierarchical Modeling Knowledge Retrieval
     description_and_analysis = f'## Task Description\n{task_description}\n\n## Task Analysis\n{task_analysis}'
+
+    # LATENT REPORTER: Log method retrieval start
+    if latent_reporter:
+        retrieval_start = f"""**Method Retrieval: Task {task_id}**
+
+**Retrieval Strategy**: Hierarchical Method Matching (HMML)
+- Knowledge Base: 98+ high-level modeling schemas
+- Scoring Method: Embedding-based similarity matching
+- Top-K Selection: {config['top_method_num']} methods
+
+**Input for Matching**:
+{description_and_analysis[:500]}
+
+{'[Input truncated]' if len(description_and_analysis) > 500 else ''}
+
+**Process**: Analyzing problem description and task analysis to find most relevant mathematical modeling approaches.
+"""
+
+        latent_reporter.log_thought(f"Task {task_id} - Method Retrieval", retrieval_start, "INFO")
+
     top_modeling_methods = mr.retrieve_methods(description_and_analysis, top_k=config['top_method_num'])
+
+    if latent_reporter:
+        # Enhanced logging with method details
+        method_details = f"""**Methods Retrieved Successfully: Task {task_id}**
+
+**Number of Methods**: {config['top_method_num']}
+
+**Retrieved Methods**:
+{top_modeling_methods[:1000]}
+
+{'[Methods list truncated]' if len(top_modeling_methods) > 1000 else ''}
+
+**Selection Process**:
+1. Calculated embedding similarity for all HMML methods
+2. Applied hierarchical scoring (parent + child weights)
+3. Selected top-{config['top_method_num']} methods by final score
+
+**Next Step**: Use retrieved methods to derive mathematical formulas and modeling approach.
+"""
+
+        latent_reporter.log_success(f"Task {task_id} - Methods Retrieved", method_details)
 
     # Task Modeling
     task_modeling_formulas, task_modeling_method = ts.modeling(task_formulas_prompt, task_modeling_prompt, problem['data_description'], task_description, task_analysis, top_modeling_methods, round=config['task_formulas_round'])
-    
+
+    if latent_reporter:
+        latent_reporter.log_success(f"Task {task_id} - Mathematical Modeling", "Derived mathematical formulas and selected optimal modeling approach. Ready for computational implementation.")
+
     return task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt
 
     

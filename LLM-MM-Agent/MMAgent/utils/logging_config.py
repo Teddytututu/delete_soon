@@ -22,6 +22,26 @@ class MMExperimentLogger:
         self.loggers = {}
         self._setup_loggers(console_level)
 
+    # =========================================================================
+    # [CRITICAL FIX] 添加缺失的属性映射
+    # =========================================================================
+    @property
+    def debug_dir(self):
+        """
+        Compatibility property for legacy code accessing .debug_dir
+        Maps to the centralized .log_dir
+        """
+        return self.log_dir
+
+    @property
+    def run_dir(self):
+        """
+        Compatibility property for legacy code accessing .run_dir
+        Maps to the output directory
+        """
+        return self.output_dir
+    # =========================================================================
+
     def _setup_loggers(self, console_level):
         """Configure SINGLE debug logger for all events."""
         # [MODIFIED] Only create ONE debug.log

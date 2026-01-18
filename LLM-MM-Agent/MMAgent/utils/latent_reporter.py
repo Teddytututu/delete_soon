@@ -73,7 +73,7 @@ class LatentReporter:
         reporter.summarize_results(solution_dict)
     """
 
-    def __init__(self, output_dir, llm_client, tracker_file=None):
+    def __init__(self, output_dir, llm_client, tracker_file=None, task_id="Unknown"):
         """
         初始化潜伏报告器
 
@@ -81,6 +81,7 @@ class LatentReporter:
             output_dir: 主输出目录 (例如 output/MM-Agent/Task_Timestamp/)
             llm_client: LLM 实例 (用于生成叙述)
             tracker_file: trace.jsonl 的路径 (可选，默认自动定位)
+            task_id: 任务ID (可选，用于日志标识)
         """
         # --- 路径修正逻辑 (反递归 Bug 修复) ---
         base_path = Path(output_dir)
@@ -103,6 +104,7 @@ class LatentReporter:
 
         self.llm = llm_client
         self.logger = logging.getLogger("main")
+        self.task_id = task_id  # Store task_id for reference
 
         # 初始化日记文件头
         if not self.journal_path.exists():
@@ -505,6 +507,205 @@ The system crashed without writing a structured error log to trace.jsonl.
             content += f"\n**尝试修复**: {attempted_fix}"
         self.log_thought("Error Analysis", content, "ERROR")
 
+    # ========================================================================
+    # [NEW] 深度调试报告系统 (Forensic Mode)
+    # ========================================================================
+
+    def log_execution_failure(self, stage: str, script_name: str, code_content: str,
+                             error_output: str, attempt: int):
+        """
+        [NEW] 记录执行失败并生成深度调试报告 ("1000字报告")
+
+        根据chat with claude2.txt的要求，实现"法医验尸"模式的日志记录，
+        提供详细的代码上下文、错误分析和修复建议。
+
+        Args:
+            stage: 当前阶段 (如 "Code Generation", "Chart Generation")
+            script_name: 脚本文件名 (如 "main1.py", "chart_1")
+            code_content: 完整的代码内容
+            error_output: 完整的 Traceback/Error String
+            attempt: 当前重试次数
+
+        Example:
+            >>> reporter.log_execution_failure(
+            ...     stage="Code Execution",
+            ...     script_name="main1.py",
+            ...     code_content="import pandas as pd\\ndf = pd.read_csv...",
+            ...     error_output="Traceback...\\nKeyError: 'YEAR'",
+            ...     attempt=2
+            ... )
+        """
+        try:
+            # 1. 提取错误上下文 (代码定位)
+            error_context = self._extract_error_context(code_content, error_output)
+
+            # 2. 调用 LLM 生成深度验尸报告
+            analysis = self._generate_forensic_report(
+                stage, script_name, code_content, error_output, error_context, attempt
+            )
+
+            # 3. 格式化 Markdown
+            timestamp = datetime.now().strftime('%H:%M:%S')
+
+            entry = f"### ❌ [{timestamp}] CRASH REPORT: {script_name} (Attempt {attempt})\n\n"
+
+            # 3.1 摘要部分 (TL;DR)
+            entry += f"**Stage**: {stage}\n"
+            entry += f"**Error Signature**: `{error_context['error_type']}: {error_context['error_msg']}`\n\n"
+
+            # 3.2 深度分析正文 (LLM 生成)
+            entry += f"{analysis}\n\n"
+
+            # 3.3 技术细节折叠块 (保留原始证据)
+            entry += "<details>\n<summary>🔍 原始堆栈与代码上下文 (点击展开)</summary>\n\n"
+
+            if error_context.get('line_number'):
+                entry += f"**Suspect Line ({error_context['line_number']})**:\n"
+                entry += f"```python\n{error_context['snippet']}\n```\n\n"
+
+            entry += "**Full Traceback**:\n"
+            # 限制Traceback长度防止爆炸
+            tb_preview = error_output[-2000:] if len(error_output) > 2000 else error_output
+            entry += f"```text\n{tb_preview}\n```\n"
+
+            entry += "\n</details>\n\n"
+
+            entry += "---\n"
+
+            # 4. 落盘
+            with open(self.journal_path, "a", encoding='utf-8') as f:
+                f.write(entry)
+
+            self.logger.info(f"Generated deep crash report for {script_name}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to log execution failure: {e}", exc_info=True)
+            # Fallback: 使用简单的log_thought
+            self.log_thought(stage, f"Execution failed for {script_name}: {str(e)[:200]}...", "ERROR")
+
+    def _extract_error_context(self, code: str, error_output: str) -> dict:
+        """
+        解析 Traceback，提取报错行号和代码片段
+
+        Args:
+            code: 完整的代码内容
+            error_output: Python解释器的错误输出
+
+        Returns:
+            dict: 包含 error_type, error_msg, line_number, snippet 的字典
+        """
+        import re
+
+        context = {
+            "error_type": "RuntimeError",
+            "error_msg": "Unknown error",
+            "line_number": None,
+            "snippet": ""
+        }
+
+        try:
+            # 1. 提取错误类型和消息 (最后一行通常是 "TypeError: ...")
+            lines = error_output.strip().split('\n')
+            if lines:
+                last_line = lines[-1]
+                if ':' in last_line:
+                    context['error_type'], context['error_msg'] = last_line.split(':', 1)
+                else:
+                    context['error_msg'] = last_line
+
+            # 2. 提取行号 (查找 "File "...", line X")
+            # 优先找最后一个提及我们脚本的行号
+            line_matches = re.findall(r'line (\d+)', error_output)
+            if line_matches:
+                # 通常 Traceback 最后出现的 line number 是最内层的错误位置
+                context['line_number'] = int(line_matches[-1])
+
+            # 3. 提取代码片段
+            if context['line_number']:
+                code_lines = code.split('\n')
+                target_idx = context['line_number'] - 1
+                if 0 <= target_idx < len(code_lines):
+                    # 提取前后 2 行
+                    start = max(0, target_idx - 2)
+                    end = min(len(code_lines), target_idx + 3)
+
+                    snippet = []
+                    for i in range(start, end):
+                        prefix = ">> " if i == target_idx else "   "
+                        snippet.append(f"{prefix}{i+1}: {code_lines[i]}")
+                    context['snippet'] = '\n'.join(snippet)
+
+        except Exception as e:
+            self.logger.warning(f"Error context extraction failed: {e}")
+
+        return context
+
+    def _generate_forensic_report(self, stage, script, code, error, context, attempt):
+        """
+        生成详细的"验尸"报告 (深度技术分析)
+
+        使用专门的Prompt要求LLM进行深度分析，而不是简单的总结。
+        """
+        # 构建一个要求极度详细的 Prompt
+        prompt = f"""
+You are a Senior Python Architect and Debugging Expert conducting a forensic analysis of a crash.
+Your goal is to write a detailed Technical Post-Mortem Report in Chinese.
+
+## Incident Context
+- **Script**: {script}
+- **Stage**: {stage}
+- **Attempt**: {attempt}
+- **Error**: {context['error_type']}: {context['error_msg']}
+
+## Suspect Code Snippet
+```python
+{context.get('snippet', 'Code snippet unavailable')}
+```
+
+## Raw Traceback (Partial)
+{error[:1000] if len(error) > 1000 else error}
+...
+
+## Report Requirements (Generate detailed Markdown)
+
+Please generate a structured report covering the following sections. Do not be brief. Be analytical and critical.
+
+1. **🔴 根本原因分析**:
+   - Explain EXACTLY why the code crashed.
+   - Was it a syntax error, logic error, or data error?
+   - If variable types were wrong, explain the mismatch.
+   - If files were missing, explain the pathing issue.
+
+2. **🧐 代码逻辑漏洞**:
+   - Analyze the specific lines of code.
+   - Point out bad practices (e.g., hardcoded paths, lack of try-except, assumption of column names).
+   - Why did the previous checks fail to catch this?
+
+3. **💥 潜在副作用**:
+   - How does this failure affect the downstream pipeline?
+   - Are there corrupted artifacts left behind?
+
+4. **🛠️ 修复建议**:
+   - Provide concrete code corrections.
+   - Suggest defensive programming techniques to prevent recurrence.
+   - **Crucial**: Provide the CORRECTED code block for the specific crashing lines.
+
+**Tone**: Highly technical, critical, and educational. Like a senior engineer reviewing a junior's broken code.
+
+Output your analysis in Chinese:
+"""
+
+        try:
+            # 使用 llm.generate() 方法生成验尸报告
+            # system 参数用于设定系统提示词
+            report = self.llm.generate(
+                prompt,
+                system="You are a merciless code auditor. Your job is to analyze crashes thoroughly and provide actionable debugging insights."
+            )
+            return report.strip()
+        except Exception as e:
+            return f"**[System Error]** Failed to generate forensic report: {e}"
+
 
 # ============================================================================
 # 便捷函数：用于快速创建和初始化 LatentReporter
@@ -517,9 +718,9 @@ def create_latent_reporter(output_dir: str, llm_client, task_id: str = "Unknown"
     Args:
         output_dir: 输出目录路径
         llm_client: LLM 实例
-        task_id: 任务 ID (保留用于兼容性，当前未使用)
+        task_id: 任务 ID (用于日志标识和报告生成)
 
     Returns:
         LatentReporter: 初始化完成的报告器实例
     """
-    return LatentReporter(output_dir, llm_client)
+    return LatentReporter(output_dir, llm_client, task_id=task_id)

@@ -1723,6 +1723,14 @@ The code execution environment has ALREADY imported the following modules for yo
 
 Simply use these modules directly in your code without importing them.
 
+**CRITICAL - FIGURE LIFECYCLE RULES:**
+- DO NOT use `plt.show()` - It will block the system
+- DO NOT use `plt.close()` - The system handles figure lifecycle automatically
+- DO NOT use `plt.clf()` or `plt.cla()` - The system needs the figure for saving
+- JUST create your visualization and leave the figure open - the system will save it
+
+The system automatically captures your figure after code execution, so you do NOT need to call plt.close().
+
 ---
 
 ### CRITICAL: FORBIDDEN CODE PATTERNS (DO NOT USE!)
@@ -1961,7 +1969,7 @@ ax.grid(True, alpha=0.3, linestyle='--')
 # Save figure
 Path(save_path).parent.mkdir(parents=True, exist_ok=True)
 plt.savefig(save_path, bbox_inches='tight', dpi=300)
-plt.close()
+# NOTE: Do NOT call plt.close() - the system handles figure cleanup
 
 print(f"Chart saved to: {{save_path}}")
 ```
@@ -2080,7 +2088,7 @@ $error_info
 - **Missing data handling** (NaN, None, empty strings)
 - **Incorrect savefig usage** (wrong path, missing dpi parameter, etc.)
 - **DataFrame column access errors** (using wrong column names)
-- **Missing plt.close() calls** (memory leaks)
+- **Using plt.close()** (DO NOT use - the system handles figure lifecycle)
 - **Figure creation issues** (missing plt.subplots(), wrong figsize)
 
 # Output Format:

@@ -109,6 +109,100 @@ class ExecutionTracker:
         if self.logger_manager:
             self.logger_manager.get_logger('errors').error(f"{error_type}: {error_message}")
 
+    # ========================================================================
+    # [TRUTH MODE] CRITICAL FIX: log_error() for complete traceback capture
+    # ========================================================================
+
+    def log_error(self, stage: str, error_obj: Exception, context: str = None):
+        """
+        【Truth Mode】记录完整的Python traceback到trace.jsonl
+
+        这是实现"日志不说谎"的核心方法。当Pipeline崩溃时，
+        此方法会将完整的Python堆栈信息记录为CRITICAL_FAILURE事件，
+        供LatentReporter进行法医式尸检分析。
+
+        Args:
+            stage: 发生错误的阶段 (如 "main_pipeline", "task_solving", "code_execution")
+            error_obj: 异常对象 (必须是Exception的实例)
+            context: 导致错误的代码片段或上下文信息 (可选)
+
+        Example:
+            >>> try:
+            ...     some_code()
+            ... except Exception as e:
+            ...     tracker.log_error("main_pipeline", e, context="While processing task 1")
+
+        Output in trace.jsonl:
+            {"timestamp": "...", "type": "CRITICAL_FAILURE", "data": {
+                "stage": "main_pipeline",
+                "error_type": "ValueError",
+                "error_message": "invalid literal for int()...",
+                "traceback": "Traceback (most recent call last):\n  File ...",
+                "context_snippet": "While processing task 1"
+            }}
+        """
+        import traceback as tb_module
+
+        try:
+            # 提取完整的Traceback
+            # 这才是Latent LLM需要看到的"真相"
+            tb_str = "".join(tb_module.format_exception(
+                type(error_obj),
+                error_obj,
+                error_obj.__traceback__
+            ))
+
+            # 构建CRITICAL_FAILURE事件payload
+            payload = {
+                "stage": stage,
+                "error_type": type(error_obj).__name__,
+                "error_message": str(error_obj),
+                "traceback": tb_str,  # <--- 真相在这里！
+                "context_snippet": context
+            }
+
+            # 写入trace.jsonl，使用特殊的"CRITICAL_FAILURE"类型
+            # 这样LatentReporter的_read_crash_site()方法可以快速定位
+            self._write("CRITICAL_FAILURE", payload)
+
+            # 同时记录到logger_manager的errors.log (如果存在)
+            if self.logger_manager:
+                error_logger = self.logger_manager.get_logger('errors')
+                error_logger.critical(
+                    f"[CRITICAL_FAILURE] Stage: {stage} | "
+                    f"Error: {type(error_obj).__name__}: {str(error_obj)} | "
+                    f"Context: {context or 'No context'}"
+                )
+
+        except Exception as logging_error:
+            # 最后的防线：如果连记录错误都失败了，打印到stderr
+            # 绝不能让错误记录失败导致原始错误被掩盖
+            print(f"[CRITICAL] Failed to log error to trace.jsonl: {logging_error}")
+            print(f"[ORIGINAL ERROR] {type(error_obj).__name__}: {str(error_obj)}")
+
+    def _write(self, type_str: str, content: Dict[str, Any]):
+        """
+        内部方法：直接写入事件到trace.jsonl
+
+        Args:
+            type_str: 事件类型 (如 "CRITICAL_FAILURE", "stage", "task")
+            content: 事件内容 (会被放入"data"字段)
+        """
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "type": type_str,
+            "data": content
+        }
+
+        try:
+            with self.lock:
+                with open(self.jsonl_path, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(event, ensure_ascii=False) + '\n')
+        except Exception as e:
+            # 如果写文件失败，至少打印到stderr
+            print(f"[ERROR] Failed to write to trace.jsonl: {e}")
+            print(f"[EVENT CONTENT] {json.dumps(event, ensure_ascii=False)[:200]}...")
+
     def track_warning(self, warning_type, warning_message, stage=None):
         self.track_event("warning", warning_type, {"message": warning_message})
 

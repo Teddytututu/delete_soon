@@ -23,7 +23,7 @@ from utils.path_autofix import apply_path_autofix_with_validation
 from agent.create_charts import ChartCreator as MinimalChartCreator
 
 
-def computational_solving(llm, coordinator, with_code, problem, task_id, task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt, config, solution, name, output_dir, dataset_dir, logger_manager=None):
+def computational_solving(llm, coordinator, with_code, problem, task_id, task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt, config, solution, name, output_dir, dataset_dir, logger_manager=None, latent_reporter=None):
     """Perform computational solving and chart generation with optional logging.
 
     Args:
@@ -42,6 +42,7 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
         name: Solution name
         output_dir: Output directory
         logger_manager: Optional MMExperimentLogger instance
+        latent_reporter: Optional LatentReporter for LLM-powered narrative logging
 
     Returns:
         Updated solution dictionary
@@ -50,6 +51,10 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     if logger_manager:
         main_logger = logger_manager.get_logger('main')
         logger_manager.log_progress(f"Task {task_id}: Code Generation...")
+
+    # [FIX] Log to LatentReporter
+    if latent_reporter:
+        latent_reporter.log_thought(f"Task {task_id} - Computational Solving", f"Starting code generation and execution for task {task_id}. Will implement mathematical models and run computations.", "INFO")
 
     # [FIX] Define Workspace directory for structured output
     workspace_dir = os.path.join(output_dir, "Workspace")
@@ -318,6 +323,11 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
             main_logger.warning(f"Failed to extract column/sample information: {e}")
         data_columns_info = ""
 
+    # Initialize execution status tracking
+    is_pass = False  # Default: code execution failed
+    task_code = ""
+    execution_result = ""
+
     if with_code:
         # CRITICAL FIX [2026-01-18] BUG FIX: Read code template from file
         # code_template_path is a Path object, but ts.coding() needs the file content as string
@@ -376,6 +386,33 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
         else:
             var_desc_str = str(var_desc)
 
+        # LATENT REPORTER: Log code generation start with schema information
+        if latent_reporter:
+            schema_stats = schema_registry.get_statistics() if schema_registry.schemas else None
+            schema_info = f"""**Code Generation: Task {task_id}**
+
+**Script Name**: {script_name}
+**Workspace**: {work_dir}
+
+**Available Data Schema**:
+{f"- Input Files: {schema_stats['input_files']}" if schema_stats else "- Schema Registry: Not available"}
+{f"- Task Files: {schema_stats['task_files']}" if schema_stats else ""}
+{f"- Total Columns: {schema_stats['total_columns']}" if schema_stats else ""}
+
+**Modeling Approach**:
+{task_modeling_method[:300] if task_modeling_method else 'Not provided'}
+
+{'[Modeling truncated]' if len(task_modeling_method) > 300 else ''}
+
+**Formulas**:
+{task_modeling_formulas[:300] if task_modeling_formulas else 'Not provided'}
+
+{'[Formulas truncated]' if len(task_modeling_formulas) > 300 else ''}
+
+**Next Step**: Generate Python implementation using LLM with schema-aware column names.
+"""
+            latent_reporter.log_thought(f"Code Generation: {script_name}", schema_info, "INFO")
+
         task_code, is_pass, execution_result = ts.coding(
             data_path_for_coding,  # FIXED: Pass directory path string, not list
             data_desc_str,  # FIXED: Ensure string format (JSON if dict/list)
@@ -390,6 +427,24 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
             work_dir,
             user_prompt=data_columns_info  # CRITICAL: Pass actual column names to LLM
         )
+
+        # LATENT REPORTER: Log code generation completion
+        if latent_reporter:
+            code_gen_details = f"""**Code Generated: Task {task_id}**
+
+**Script**: {script_name}
+**Code Length**: {len(task_code)} characters
+**Execution Status**: {'✅ SUCCESS' if is_pass else '❌ FAILED'}
+
+**Execution Output**:
+{execution_result[:500] if execution_result else 'No output'}
+
+{'[Output truncated]' if len(execution_result) > 500 else ''}
+
+**Next Step**: Extract code structure and generate result interpretation.
+"""
+            latent_reporter.log_thought(f"Code Generated: {script_name}", code_gen_details, "SUCCESS" if is_pass else "WARNING")
+
         code_structure = ts.extract_code_structure(task_id, task_code, save_path)
         task_result = ts.result(task_description, task_analysis, task_modeling_formulas, task_modeling_method, execution_result)
         task_answer = ts.answer(task_description, task_analysis, task_modeling_formulas, task_modeling_method, task_result)
@@ -600,5 +655,42 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
             f"Task {task_id}: Charts generated - "
             f"{success_count}/{len(charts)} successful"
         )
+
+    # [FIX] Log result to LatentReporter - reflect actual success/failure
+    if latent_reporter:
+        # Determine actual task completion status
+        # Check if code execution succeeded and if charts were generated successfully
+        code_success = with_code and is_pass
+        charts_success = success_count > 0
+        all_success = code_success and charts_success and success_count == len(charts)
+
+        if all_success:
+            # Full success: code ran AND all charts generated
+            latent_reporter.log_success(
+                f"Task {task_id} - Computational Solving",
+                f"Code execution successful. Generated {success_count}/{len(charts)} visualizations. All computational results saved and ready for reporting."
+            )
+        elif code_success and success_count > 0:
+            # Partial success: code ran but some charts failed
+            latent_reporter.log_thought(
+                f"Task {task_id} - Computational Solving",
+                f"Code execution successful but chart generation partially failed: {success_count}/{len(charts)} charts generated. {len(charts) - success_count} charts failed. Computational results saved.",
+                status="WARNING"
+            )
+        elif code_success:
+            # Code succeeded but no charts
+            latent_reporter.log_thought(
+                f"Task {task_id} - Computational Solving",
+                f"Code execution successful but all {len(charts)} chart generation attempts failed. Computational results saved but no visualizations available.",
+                status="WARNING"
+            )
+        else:
+            # Code execution failed
+            failure_reason = f"Code execution failed after multiple attempts" if with_code else "Code execution not enabled"
+            latent_reporter.log_thought(
+                f"Task {task_id} - Computational Solving",
+                f"{failure_reason}. {success_count}/{len(charts)} charts generated. Task may not produce valid results without successful code execution.",
+                status="ERROR"
+            )
 
     return solution

@@ -506,8 +506,8 @@ Focus on: What was the main purpose and outcome?"""
 
             # Save to latent_summaries.jsonl in debug directory
             if self.logger_manager:
-                debug_dir = self.logger_manager.debug_dir
-                summary_file = debug_dir / "latent_summaries.jsonl"
+                log_dir = self.logger_manager.log_dir
+                summary_file = log_dir / "latent_summaries.jsonl"
 
                 summary_entry = {
                     "timestamp": time.time(),

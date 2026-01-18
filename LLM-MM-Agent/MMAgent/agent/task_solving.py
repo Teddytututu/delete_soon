@@ -1390,6 +1390,32 @@ class TaskSolver(BaseAgent):
                 if attempt == 1:
                     # [Attempt 1] Generate initial code from scratch
                     print(f"[Attempt {attempt}/{MAX_TOTAL_RETRIES}] Generating initial code...")
+
+                    # LATENT REPORTER: Log initial code generation
+                    initial_gen_details = f"""**Initial Code Generation: Attempt 1/{MAX_TOTAL_RETRIES}**
+
+**Script**: {script_name}
+**Task**: {task_description[:100]}...
+
+**Generation Strategy**: Initial code generation from scratch
+- Input: Task description, formulas, modeling approach, data summary
+- Process: LLM will generate complete Python implementation
+- Expected Output: Executable script with data processing and analysis
+
+**Code Template Available**: {'Yes' if code_template else 'No'}
+**Modeling Approach**: {modeling[:200] if modeling else 'Not provided'}...
+
+{'[Modeling truncated]' if len(modeling) > 200 else ''}
+
+**Next Step**: Generate initial Python code based on requirements.
+"""
+
+                    self._log_thought(
+                        stage=f"Initial Code Generation: {script_name}",
+                        content=initial_gen_details,
+                        status="INFO"
+                    )
+
                     current_code, observation = self.coding_actor(
                         data_file=data_file,
                         data_summary=data_summary,
@@ -1411,10 +1437,30 @@ class TaskSolver(BaseAgent):
                     # CRITICAL FIX #8: Intelligent error analysis
                     error_category, hint = self._analyze_error(last_error)
 
-                    # LATENT REPORTER: Log error analysis
+                    # LATENT REPORTER: Enhanced error analysis logging with full details
+                    error_details = f"""**Error Analysis for Attempt {attempt}/{MAX_TOTAL_RETRIES}**
+
+**Error Category**: {error_category}
+- FATAL: Cannot be fixed by retrying (will stop)
+- HALLUCINATION: LLM made wrong assumptions (needs strong guidance)
+- TRANSIENT: Can be fixed by normal retry
+
+**Last Error**:
+{last_error[:800]}
+
+{'[Full error truncated]' if len(last_error) > 800 else ''}
+
+**Debug Strategy**:
+{hint[:500]}
+
+{'[Full hint truncated]' if len(hint) > 500 else ''}
+
+**Next Step**: {'Stop immediately (fatal error)' if error_category == 'FATAL' else 'Invoke debugger with enhanced guidance'}
+"""
+
                     self._log_thought(
-                        stage="Code Debugging",
-                        content=f"Attempt {attempt}: Analyzing error - {error_category}. Last error: {last_error[:200]}...",
+                        stage=f"Error Analysis: {script_name}",
+                        content=error_details,
                         status="WARNING"
                     )
 
@@ -1423,10 +1469,27 @@ class TaskSolver(BaseAgent):
                         print(f"[Attempt {attempt}/{MAX_TOTAL_RETRIES}] FATAL ERROR detected: {last_error[:100]}...")
                         print("[FATAL] Stopping retries to save tokens and API quota.")
 
-                        # LATENT REPORTER: Log fatal error
+                        # LATENT REPORTER: Log fatal error with maximum detail
+                        fatal_details = f"""**FATAL ERROR - Stopping All Retries**
+
+**Error Type**: {error_category}
+**Script**: {script_name}
+**Attempt**: {attempt}/{MAX_TOTAL_RETRIES}
+
+**Full Error Message**:
+{last_error}
+
+**Explanation**: This is a fatal error that cannot be fixed by retrying. Common causes:
+- Missing dataset file (check file paths)
+- Empty data file (check data quality)
+- Invalid file format (check data preprocessing)
+
+**Recommended Action**: Manually inspect the dataset and problem setup.
+"""
+
                         self._log_thought(
-                            stage="Code Debugging",
-                            content=f"Fatal error encountered: {error_category}. {last_error[:300]}",
+                            stage=f"Fatal Error: {script_name}",
+                            content=fatal_details,
                             status="ERROR"
                         )
                         break  # Exit loop early
@@ -1437,6 +1500,28 @@ class TaskSolver(BaseAgent):
 
                     # Construct enhanced user prompt with intelligent hint
                     enhanced_user_prompt = f"{user_prompt}\n\n{hint}" if hint else user_prompt
+
+                    # LATENT REPORTER: Log debugger invocation with strategy details
+                    debugger_details = f"""**Invoking Code Debugger: Attempt {attempt}/{MAX_TOTAL_RETRIES}**
+
+**Debugging Strategy**: {error_category}
+- **Enhanced Guidance**: Provided specific hints based on error analysis
+- **Previous Code Length**: {len(current_code)} characters
+- **Code Modification**: Debugger will modify existing code based on error feedback
+
+**Enhanced Prompt Includes**:
+{hint[:300] if hint else 'No specific hint (generic error)'}
+
+{'[Full hint truncated]' if len(hint) > 300 else ''}
+
+**Expected Action**: Debugger will analyze the error, apply the provided guidance, and generate corrected code.
+"""
+
+                    self._log_thought(
+                        stage=f"Debugger Invocation: {script_name}",
+                        content=debugger_details,
+                        status="INFO"
+                    )
 
                     # Call debugger with enhanced prompt
                     current_code, observation = self.coding_debugger(
@@ -1478,10 +1563,11 @@ class TaskSolver(BaseAgent):
             if is_pass:
                 print(f"[Attempt {attempt}/{MAX_TOTAL_RETRIES}] ✅ SUCCESS! Code executed successfully.")
 
-                # LATENT REPORTER: Log success with artifact and output
+                # LATENT REPORTER: Log success with detailed output
+                output_preview = output[:500] if len(output) > 500 else output
                 self._log_thought(
                     stage=f"Coding Complete: {script_name}",
-                    content=f"Successfully executed after {attempt} attempts.\nOutput: {output[:200]}",
+                    content=f"Successfully executed after {attempt} attempt(s).\n\nExecution Output:\n{output_preview}\n\n{'[Full output truncated]' if len(output) > 500 else ''}",
                     status="SUCCESS",
                     artifact={"type": "code", "path": save_path, "description": f"Generated script: {script_name}"}
                 )
@@ -1491,6 +1577,34 @@ class TaskSolver(BaseAgent):
             # PHASE 4: Record Error for Next Iteration
             # --------------------------------------------------------------------
             print(f"[Attempt {attempt}/{MAX_TOTAL_RETRIES}] ❌ Execution failed.")
+
+            # [NEW] LATENT REPORTER: 深度调试报告 (Forensic Mode)
+            # 根据chat with claude2.txt要求，生成详细的"验尸"报告
+            if self.reporter:
+                try:
+                    self.reporter.log_execution_failure(
+                        stage="Code Execution",
+                        script_name=script_name,
+                        code_content=current_code,
+                        error_output=output,
+                        attempt=attempt
+                    )
+                except Exception as reporter_error:
+                    # Fallback: 如果深度报告失败，使用简单日志
+                    self.logger.warning(f"Deep crash report failed: {reporter_error}, using fallback")
+                    self._log_thought(
+                        stage=f"Execution Failed: {script_name}",
+                        content=f"Attempt {attempt}/{MAX_TOTAL_RETRIES} failed. Error: {output[:500]}",
+                        status="WARNING"
+                    )
+            else:
+                # 保持向后兼容：没有reporter时使用简单日志
+                self._log_thought(
+                    stage=f"Execution Failed: {script_name}",
+                    content=f"Attempt {attempt}/{MAX_TOTAL_RETRIES} failed. Error: {output[:500]}",
+                    status="WARNING"
+                )
+
             history.append({'code': current_code, 'error': output})
 
             # Keep best code as fallback (code that at least generated some output)
@@ -1507,12 +1621,32 @@ class TaskSolver(BaseAgent):
         fallback_code = best_code if best_code else current_code
         fallback_error = history[-1]['error'] if history else "Unknown error"
 
-        # LATENT REPORTER: Log final failure
-        self._log_thought(
-            stage="Code Execution",
-            content=f"All {MAX_TOTAL_RETRIES} attempts failed for {script_name}. Last error: {fallback_error[:300]}",
-            status="ERROR"
-        )
+        # [NEW] LATENT REPORTER: 最终失败的深度调试报告
+        # 所有尝试都失败了，生成最后一次的详细验尸报告
+        if self.reporter:
+            try:
+                self.reporter.log_execution_failure(
+                    stage="Code Execution - FINAL FAILURE",
+                    script_name=script_name,
+                    code_content=fallback_code,
+                    error_output=fallback_error,
+                    attempt=MAX_TOTAL_RETRIES
+                )
+            except Exception as reporter_error:
+                # Fallback
+                self.logger.warning(f"Final crash report failed: {reporter_error}, using fallback")
+                self._log_thought(
+                    stage="Code Execution",
+                    content=f"All {MAX_TOTAL_RETRIES} attempts failed for {script_name}. Last error: {fallback_error[:300]}",
+                    status="ERROR"
+                )
+        else:
+            # 保持向后兼容
+            self._log_thought(
+                stage="Code Execution",
+                content=f"All {MAX_TOTAL_RETRIES} attempts failed for {script_name}. Last error: {fallback_error[:300]}",
+                status="ERROR"
+            )
 
         return fallback_code, False, fallback_error
 

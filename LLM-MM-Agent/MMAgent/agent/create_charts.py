@@ -689,7 +689,7 @@ class ChartCreator(BaseAgent):
 
         if LatentReporter and output_dir:
             try:
-                self.reporter = LatentReporter(output_dir, llm, task_id)
+                self.reporter = LatentReporter(output_dir, llm, task_id=task_id)
                 logger.info(f"[ChartCreator] LatentReporter initialized for task {task_id}")
             except Exception as e:
                 logger.warning(f"[ChartCreator] Failed to initialize LatentReporter: {e}")
@@ -867,6 +867,41 @@ class ChartCreator(BaseAgent):
             existing_charts = '\n---\n'.join(charts)
         return charts
 
+    def _sanitize_data_context(self, raw_info: str) -> str:
+        """
+        【新增组件】上下文净化器
+        功能：清洗上游传入的字符串，移除绝对路径、盘符、敏感目录信息。
+
+        解决 Guard 9 违规的根源：让 LLM 根本看不到绝对路径。
+
+        Args:
+            raw_info: 原始数据上下文信息（可能包含绝对路径）
+
+        Returns:
+            清洗后的安全上下文（仅保留文件名）
+        """
+        if not raw_info:
+            return ""
+
+        import re
+        import os
+
+        # 1. 移除 Windows 盘符和路径 (如 D:\\clean version\\...)
+        # 替换为仅保留文件名
+        # 匹配: 任意字母:\\...直到文件名
+        clean_info = re.sub(r'[a-zA-Z]:\\[^:\n]*\\([^\\]+\.csv)', r'\1', raw_info)
+
+        # 2. 移除 Unix 绝对路径 (/home/user/...)
+        clean_info = re.sub(r'/[^:\n]*/([^/]+\.csv)', r'\1', clean_info)
+
+        # 3. 移除常见的残留路径片段
+        # 防止 LLM 看到 "D:\\" 或 "clean version" 后产生联想
+        forbidden_tokens = ["D:\\", "C:\\", "/home/", "/Users/", "clean version"]
+        for token in forbidden_tokens:
+            clean_info = clean_info.replace(token, "")
+
+        return clean_info
+
     def description_to_code(self, chart_description: str, data_files: list = None, data_columns_info: str = None):
         """
         Convert chart description to matplotlib code.
@@ -898,7 +933,17 @@ class ChartCreator(BaseAgent):
         if data_columns_info and 'Available Data Files and Columns' in data_columns_info:
             # This info comes from computational_solving.py (lines 54-101)
             # It's already formatted and contains all column names we need
-            data_context = "\n\n## [DATA CONTRACT] Pre-Validated Column Information\n\n"
+
+            # =====================================================================
+            # [Step 1] 上下文深度清洗 (Context Deep Cleaning)
+            # 解决 "Guard 9" 的根源：让 LLM 根本看不到绝对路径
+            # =====================================================================
+            original_len = len(data_columns_info)
+            data_columns_info = self._sanitize_data_context(data_columns_info)
+            if len(data_columns_info) < original_len:
+                logger.info(f"[Context] Sanitized absolute paths from column info. Removed {original_len - len(data_columns_info)} chars.")
+
+            data_context = "\n\n## [SAFE DATA CONTEXT] Available Data & Columns (Sanitized)\n\n"
             data_context += data_columns_info
             data_context += "\n"
             data_context += "[CRITICAL] YOU MUST ONLY USE THE COLUMN NAMES LISTED ABOVE.\n"
@@ -986,27 +1031,109 @@ class ChartCreator(BaseAgent):
         else:
             logger.warning(f"No data files or column info available - LLM will likely hallucinate")
 
-        enhanced_description = chart_description + data_context
+        # =====================================================================
+        # [Step 2] 注入强约束指令 (System Constraints Injection)
+        # 解决 "语法错误" 和 "路径幻觉" 的认知层问题
+        # =====================================================================
+        system_constraints = """
+[CRITICAL SYSTEM RULES - VIOLATION LEADS TO CRASH]
+1. **NO ABSOLUTE PATHS**: You are running in a sandbox.
+   - FORBIDDEN: `df = pd.read_csv('D:/data/file.csv')`
+   - REQUIRED:  `df = load_csv('file.csv')`
+   - Only use the filenames listed in the [SAFE DATA CONTEXT].
+
+2. **STRICT SYNTAX**:
+   - DO NOT use compressed assignments like `df = pd.read_csv(...), plt.figure()`.
+   - Write ONE command per line.
+   - CHECK your commas in `dict` and `arrowprops`.
+     - WRONG: `arrowprops=dict(facecolor='black' width=1)`
+     - RIGHT: `arrowprops=dict(facecolor='black', width=1)`
+
+3. **DATA LOADING**:
+   - USE `load_csv('filename.csv')` function provided by the system.
+   - DO NOT use `pd.read_csv` directly.
+"""
+
+        enhanced_description = (
+            f"{system_constraints}\n\n"
+            f"## User Request\n{chart_description}\n\n"
+            f"{data_context}"
+        )
+
         # CRITICAL FIX: Use Template with safe_substitute() and escaped values
         prompt = Template(CHART_TO_CODE_PROMPT).safe_substitute(
             chart_description=_escape_template_value(enhanced_description)
         )
 
-        # P0-5: 强制只输出代码块（用户要求：只接受 ```python ... ``` 内部内容）
-        raw_response = self.llm.generate(prompt)
+        # =====================================================================
+        # [Step 3] 智能反馈闭环 (Generation-Validation-Refinement Loop)
+        # 替代死板的正则修复，利用 LLM 的理解能力修 Bug
+        # =====================================================================
+        from utils.code_guards import CodeExecutionGuards
+        import ast
 
-        try:
-            from utils.code_guards import CodeExecutionGuards
-            extracted_code, errors = CodeExecutionGuards.extract_code_block(
-                raw_response,
-                require_code_only=True  # 拒绝自然语言混入
-            )
-            logger.info(f"[P0-5] Successfully extracted code block from LLM response ({len(extracted_code)} chars)")
-            return extracted_code
-        except ValueError as e:
-            logger.error(f"[P0-5] Code block extraction failed: {e}")
-            # Raise exception to trigger retry logic in calling code
-            raise ValueError(f"P0-5 Code Block Extraction Failed: {e}")
+        max_retries = 3
+        current_prompt = prompt
+        last_error = None
+        base_description = enhanced_description  # 保存原始请求
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[Gen] Attempt {attempt + 1}/{max_retries}")
+
+                # 1. 生成 (Generate)
+                raw_response = self.llm.generate(current_prompt)
+
+                # 2. 提取 (Code Block Extraction)
+                # 这里可能会抛出 "Guard 9 Violation" (路径错误) 或其他异常
+                extracted_code, errors = CodeExecutionGuards.extract_code_block(
+                    raw_response,
+                    require_code_only=True
+                )
+
+                # 3. 预检查 (Pre-Flight Checks)
+                # 3.1 检查绝对路径 (Guard 9 double check)
+                import re
+                if re.search(r'[a-zA-Z]:[\\/]', extracted_code):
+                    raise ValueError("[Guard 9] Absolute path detected. Use load_csv('filename') only.")
+
+                # 3.2 检查基本语法 (Syntax Check)
+                try:
+                    ast.parse(extracted_code)
+                except SyntaxError as se:
+                    # 捕获具体的语法错误行
+                    error_line = se.text if se.text else "unknown"
+                    raise ValueError(f"SyntaxError at line {se.lineno}: {se.msg}\nLine: {error_line}")
+
+                # 如果通过所有检查，返回代码
+                logger.info(f"[Gen] Attempt {attempt + 1} success. Code: {len(extracted_code)} chars")
+                return extracted_code
+
+            except (ValueError, SyntaxError) as e:
+                last_error = str(e)
+                logger.warning(f"[Gen] Attempt {attempt + 1} rejected: {e}")
+
+                # 如果这是最后一次尝试，不要构造新的 prompt
+                if attempt == max_retries - 1:
+                    break
+
+                # 4. 构造反馈上下文 (Refinement Context)
+                # 告诉 LLM 具体哪里错了，让它自己改，而不是用正则乱改
+                refinement_instruction = f"""
+[SYSTEM ERROR FEEDBACK]
+Your previous code was rejected due to the following error:
+{last_error}
+
+Please REWRITE the code to fix this error.
+- If "SyntaxError": Check for missing commas in dicts or arrowprops.
+- If "Guard 9": Remove absolute paths, use `load_csv('filename')`.
+- Return ONLY the corrected Python code block.
+"""
+                # 更新 Prompt，进入下一次循环
+                current_prompt = f"{base_description}\n\n{refinement_instruction}"
+
+        # 循环结束仍未成功
+        raise ValueError(f"Failed to generate valid code after {max_retries} attempts. Last error: {last_error}")
 
     # ============================================
     # P1-6: JSON-based Chart Generation (Alternative Method)
@@ -1152,42 +1279,53 @@ class ChartCreator(BaseAgent):
                 schema_registry.scan_directory(str(data_mgr.data_dir), source='input_data')
                 logger.info(f"[P1-5] Schema Registry initialized for chart generation: {len(schema_registry.schemas)} files")
 
-            # P0-1: LOCAL SYNTAX PATCHER (用户要求：专治arrowprops漏逗号等高频语法错误)
-            # 在ast.parse前做regex修补，避免LLM反复重试同类错误
-            def apply_local_syntax_patches(code_str: str) -> str:
-                """
-                P0-1 本地语法补丁器：修复常见LLM生成的语法错误
+            # =====================================================================
+            # [REFACTORED] P0-1: LOCAL SYNTAX PATCHER - DISABLED
+            # 原因：这个正则补丁器经常把代码改得更糟（例如：df =, pd.read_csv(...)）
+            #
+            # 根据 gemini 1.txt 重构方案：
+            # "用'死板的正则'去修'灵活的 LLM 输出'，是方向性错误"
+            #
+            # 新方案：使用 LLM 自我修正（Intelligent Feedback Loop）
+            # 当代码生成失败时，将错误堆栈作为新上下文喂回给 LLM
+            # =====================================================================
 
-                修复模式：
-                - arrowprops=dict(facecolor='black' width=...) → 加逗号
-                - alpha=0.7 linewidth=... → 加逗号
-                - 其他dict参数漏逗号
-
-                Args:
-                    code_str: LLM生成的代码
-
-                Returns:
-                    修补后的代码
-                """
-                import re
-
-                # 修复1: arrowprops dict中漏逗号（最高频）
-                # facecolor='black' width= → facecolor='black', width=
-                pattern1 = r"(['\"])(?:black|white|red|blue|green)(?:\1)\s+([a-z_]+)\s*="
-                code_str = re.sub(pattern1, r"\1, \2=", code_str)
-
-                # 修复2: alpha/linewidth/fontsize等参数前漏逗号
-                pattern2 = r"=\s*([0-9.]+)\s+([a-z_]+)\s*="
-                code_str = re.sub(pattern2, r"= \1, \2=", code_str)
-
-                # 修复3: dict中多个键值对之间漏逗号
-                # key1=value1 key2=value2 → key1=value1, key2=value2
-                pattern3 = r"(['\"]?[\w]+['\"]?)\s*=\s*[^,=\s]+\s+(['\"]?[\w]+['\"]?)\s*=\s*"
-                def add_comma_between_kv(match):
-                    return match.group(0)[:-1] + ", " + match.group(0)[-1]
-                code_str = re.sub(pattern3, add_comma_between_kv, code_str)
-
-                return code_str
+            # # P0-1: LOCAL SYNTAX PATCHER (用户要求：专治arrowprops漏逗号等高频语法错误)
+            # # 在ast.parse前做regex修补，避免LLM反复重试同类错误
+            # def apply_local_syntax_patches(code_str: str) -> str:
+            #     """
+            #     P0-1 本地语法补丁器：修复常见LLM生成的语法错误
+            #
+            #     修复模式：
+            #     - arrowprops=dict(facecolor='black' width=...) → 加逗号
+            #     - alpha=0.7 linewidth=... → 加逗号
+            #     - 其他dict参数漏逗号
+            #
+            #     Args:
+            #         code_str: LLM生成的代码
+            #
+            #     Returns:
+            #         修补后的代码
+            #     """
+            #     import re
+            #
+            #     # 修复1: arrowprops dict中漏逗号（最高频）
+            #     # facecolor='black' width= → facecolor='black', width=
+            #     pattern1 = r"(['\"])(?:black|white|red|blue|green)(?:\1)\s+([a-z_]+)\s*="
+            #     code_str = re.sub(pattern1, r"\1, \2=", code_str)
+            #
+            #     # 修复2: alpha/linewidth/fontsize等参数前漏逗号
+            #     pattern2 = r"=\s*([0-9.]+)\s+([a-z_]+)\s*="
+            #     code_str = re.sub(pattern2, r"= \1, \2=", code_str)
+            #
+            #     # 修复3: dict中多个键值对之间漏逗号
+            #     # key1=value1 key2=value2 → key1=value1, key2=value2
+            #     pattern3 = r"(['\"]?[\w]+['\"]?)\s*=\s*[^,=\s]+\s+(['\"]?[\w]+['\"]?)\s*=\s*"
+            #     def add_comma_between_kv(match):
+            #         return match.group(0)[:-1] + ", " + match.group(0)[-1]
+            #     code_str = re.sub(pattern3, add_comma_between_kv, code_str)
+            #
+            #     return code_str
 
             # P0-3 FIX: Apply pre-syntax sanitize FIRST (before any other validation)
             # This fixes syntax garbage like "=," generated by LLM auto-fixers
@@ -1198,9 +1336,10 @@ class ChartCreator(BaseAgent):
             else:
                 code_sanitized = code  # No changes needed
 
-            # 应用本地语法补丁（在ast.parse前）
-            code_patched = apply_local_syntax_patches(code_sanitized)
-            logger.debug("[P0-1] Applied local syntax patches for arrowprops/dict errors")
+            # [REFACTORED] 不再使用 apply_local_syntax_patches
+            # 直接使用 code_sanitized，让语法验证和 LLM 自我修正处理错误
+            code_patched = code_sanitized
+            # logger.debug("[P0-1] Applied local syntax patches for arrowprops/dict errors")  # DISABLED
 
             # P0 FIX #4: Additional syntax validation using assert_syntax_ok utility
             # This provides an extra safety layer before execution
@@ -2108,15 +2247,76 @@ plt.savefig(save_path'''
             # Clean up empty lines left by import removal
             code = re.sub(r'\n\s*\n\s*\n', '\n\n', code)
 
-            # Layer 2: Runtime blocking (prevent __import__ during exec)
-            def _blocked_import(name, *args, **kwargs):
-                """Block ALL import attempts at runtime - system provides all needed modules"""
-                logger.error(f"[P1-1] Blocked runtime import attempt: {name}")
-                raise ImportError(
-                    f"[SECURITY] Import statements are NOT ALLOWED in chart code. "
-                    f"The system provides all necessary modules (pd, plt, np, load_csv). "
-                    f"Attempted to import: {name}"
-                )
+            # =================================================================
+            # [CRITICAL FIX] 智能运行时导入拦截器 (Smart Runtime Import Guard)
+            # 解决问题：matplotlib 内部动态导入被拦截导致图表生成失败
+            # =================================================================
+
+            # 定义绝对允许的模块前缀 (不仅是 matplotlib，还有它依赖的底层库)
+            # 这些库在运行时经常会进行 lazy import，必须放行
+            ALLOWED_RUNTIME_MODULES = {
+                # 核心科学计算栈
+                'matplotlib', 'matplotlib.pyplot', 'matplotlib.backends',
+                'numpy', 'pandas', 'seaborn', 'scipy',
+
+                # 图像处理与工具
+                'PIL', 'dateutil', 'pytz', 'six', 'packaging',
+
+                # Python 内置安全标准库 (Matplotlib 内部可能会用到)
+                'math', 're', 'collections', 'itertools', 'functools',
+                'numbers', 'contextlib', 'copy', 'datetime', 'time', 'json',
+                'io', 'abc', 'types', 'warnings', 'logging', 'decimal',
+                ' fractions', 'enum', 'random'
+            }
+
+            # 定义绝对禁止的危险模块 (黑名单)
+            FORBIDDEN_RUNTIME_MODULES = {
+                'os', 'sys', 'subprocess', 'shutil', 'builtins', 'importlib',
+                'inspect', 'exec', 'eval', 'socket', 'requests', 'urllib',
+                'http', 'ftplib', 'telnetlib', 'pickle', 'shelve', 'shlex',
+                'platform', 'ctypes', 'multiprocessing', 'threading', 'asyncio'
+            }
+
+            def _blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+                """
+                智能导入拦截器：区分"良性库内部加载"与"恶意代码加载"
+
+                关键改进：
+                1. 不再拦截所有导入 - 允许 matplotlib 内部的 lazy import
+                2. 使用白名单放行科学计算栈及其依赖
+                3. 使用黑名单拦截高危系统操作模块
+                4. 保护系统安全的同时确保 matplotlib 正常工作
+                """
+                # 1. 检查是否在黑名单中 (最优先拦截)
+                # 处理如 'os.path' 这样的子模块情况
+                base_name = name.split('.')[0]
+                if base_name in FORBIDDEN_RUNTIME_MODULES:
+                    logger.error(f"[SECURITY] BLOCKED High-Risk Import: {name}")
+                    raise ImportError(f"[SECURITY] Import of '{name}' is strictly forbidden.")
+
+                # 2. 检查是否在白名单中 (放行库内部的 import)
+                # 只要以白名单开头，就允许。例如 'matplotlib.backends.backend_agg'
+                is_allowed = False
+                for allowed in ALLOWED_RUNTIME_MODULES:
+                    if name == allowed or name.startswith(allowed + '.'):
+                        is_allowed = True
+                        break
+
+                # 3. 决策逻辑
+                if is_allowed:
+                    # [DEBUG] 可以取消注释下一行来调试具体的放行情况
+                    # logger.debug(f"[SECURITY] Allowed runtime import: {name}")
+                    return original_import(name, globals, locals, fromlist, level)
+                else:
+                    # 4. 未知模块拦截
+                    # 如果不是显式白名单，也不是显式黑名单，我们记录并拦截
+                    # 这有助于发现未来可能缺少的白名单项
+                    logger.warning(f"[SECURITY] BLOCKED Unknown Import: {name}")
+                    raise ImportError(
+                        f"[SECURITY] Runtime import of '{name}' is not in the whitelist.\n"
+                        f"Allowed modules: {sorted(list(ALLOWED_RUNTIME_MODULES))}\n"
+                        f"Please use standard libraries provided in the context."
+                    )
 
             # Save original __import__ and block it
             # [CRITICAL FIX 2026-01-18] Handle __builtins__ as both module and dict
@@ -2129,14 +2329,91 @@ plt.savefig(save_path'''
                 __builtins__.__import__ = _blocked_import
 
             try:
+                # =====================================================================
+                # [CRITICAL FIX Issue 10] Runtime Hooking: Implement "Undying Charts" mechanism
+                # =====================================================================
+                # Problem: LLM code calls plt.close() or plt.clf() before system can save
+                # Solution: Hook plt.close() and plt.savefig() to prevent premature destruction
+
+                # Save original plt.close and plt.savefig functions
+                original_plt_close = plt.close
+                original_plt_savefig = plt.savefig
+
+                # Track files LLM tries to save
+                saved_artifacts = []
+
+                # Define no-op close function (intercepts plt.close() calls from LLM)
+                def no_op_close(*args, **kwargs):
+                    # Log interception for debugging
+                    logger.debug("[CHART FIX] Intercepted plt.close() call from LLM code. Keeping figure open.")
+                    pass  # Do nothing - keep figure alive for system to save
+
+                # Define hooked savefig to track LLM save attempts
+                def hooked_savefig(*args, **kwargs):
+                    # Record filename LLM tried to save
+                    if args:
+                        saved_artifacts.append(args[0])
+                        logger.debug(f"[CHART FIX] LLM tried to save to: {args[0]}")
+                    # Still execute save - let LLM think it succeeded
+                    return original_plt_savefig(*args, **kwargs)
+
+                # Apply hooks: Override module-level functions
+                plt.close = no_op_close
+                plt.savefig = hooked_savefig
+
                 # Execute the code with restricted namespace and validated imports
+                # Note: Any plt.close() calls in the code are now disabled
                 exec(code, namespace)
+
+                # =====================================================================
+                # [CRITICAL FIX Issue 10] Force Capture Chart
+                # =====================================================================
+                # After code execution, check if there's an active figure and save it
+
+                # Check for any active figures (created by the executed code)
+                import matplotlib.pyplot as plt_module
+                all_figures = plt_module._pylab_helpers.Gcf.get_all_fig_managers()
+
+                if all_figures:
+                    # Get the most recent figure
+                    fig = all_figures[-1].canvas.figure
+                    logger.info(f"[CHART FIX] Active figure found, forcing save to: {save_path}")
+
+                    # System Override: Force save with high quality
+                    save_path_obj = Path(save_path)
+                    save_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                    fig.savefig(save_path_obj, dpi=300, bbox_inches='tight')
+                    logger.info(f"[CHART FIX] Chart captured and saved to: {save_path}")
+
+                    # Only close after system has saved it
+                    original_plt_close(fig)
+                else:
+                    # No active figure - check if LLM saved it themselves
+                    if saved_artifacts:
+                        logger.info(f"[CHART FIX] No active figure, but LLM saved: {saved_artifacts}")
+                        # Chart might already be saved - verify
+                        for artifact in saved_artifacts:
+                            if Path(artifact).exists():
+                                logger.info(f"[CHART FIX] LLM-saved file exists: {artifact}")
+                    else:
+                        logger.warning(f"[CHART FIX] No active figure found after code execution")
+
             finally:
+                # =================================================================
+                # [CLEANUP] Restore environment
+                # =================================================================
+                # Must restore original functions to avoid affecting other agents
+                plt.close = original_plt_close
+                plt.savefig = original_plt_savefig
+
                 # Restore original __import__ (important for system stability)
                 if isinstance(__builtins__, dict):
                     __builtins__['__import__'] = original_import
                 else:
                     __builtins__.__import__ = original_import
+
+                # Clean up to prevent memory leaks
+                plt.close('all')
 
             # Step 4 (continued): 调用finalize_plot作为安全网（用户要求）
             # 即使代码执行了，也要确保文件一定落盘
@@ -2286,10 +2563,51 @@ plt.savefig(save_path'''
         else:
             print(f"  [WARN] No pre-extracted column info, will extract from data files")
 
-        # Generate matplotlib code from description
-        print("  -> Converting description to matplotlib code...")
-        # CRITICAL FIX: Pass data_columns_info to ensure LLM knows actual column names
-        code = self.description_to_code(chart_description, data_files, data_columns_info)
+        # =====================================================================
+        # [Step 4] 最后的防线 (Final Error Isolation)
+        # 无论是生成失败、语法错误还是 Guard 拦截，都在这里截停
+        # 确保单图失败不影响大局 (Pipeline 继续运行)
+        # =====================================================================
+        try:
+            print("  -> Converting description to matplotlib code...")
+            # CRITICAL FIX: Pass data_columns_info to ensure LLM knows actual column names
+            code = self.description_to_code(chart_description, data_files, data_columns_info)
+
+        except ValueError as gen_error:
+            # 捕获 Guard 9 (Path) 或 Guard 8 (Syntax) 等提取阶段的错误
+            error_msg = f"Code generation failed (Guard Violation): {str(gen_error)}"
+            logger.error(f"[create_chart_with_image] {error_msg}")
+            print(f"  [FAIL] {error_msg}")
+
+            # [NEW] LATENT REPORTER: Log this specific failure
+            if self.reporter:
+                try:
+                    self.reporter.log_thought(
+                        stage="Data Visualization",
+                        raw_content=f"Failed to generate code for chart: {chart_description}\nError: {str(gen_error)}",
+                        status="ERROR"
+                    )
+                except: pass
+
+            # 优雅返回失败结果，而不是崩溃
+            return {
+                'description': chart_description,
+                'code': None,
+                'image_path': None,
+                'success': False,
+                'error': error_msg
+            }
+        except Exception as e:
+            # 捕获所有其他未知错误
+            error_msg = f"Unexpected error during code generation: {type(e).__name__}: {str(e)}"
+            logger.error(f"[create_chart_with_image] {error_msg}")
+            return {
+                'description': chart_description,
+                'code': None,
+                'image_path': None,
+                'success': False,
+                'error': error_msg
+            }
 
         # Extract code block if present
         if "```python" in code:
@@ -2630,25 +2948,60 @@ Do NOT use '{missing_column}' - it doesn't exist!
 
             print(f"  -> Generating Chart {i+1}/{len(chart_descriptions)}: {save_path}")
 
-            # Reuse existing single-chart generation logic
-            # This inherits all safety features:
-            # - P0-2 column validation guards
-            # - Automatic retry on failure (max_retries=3)
-            # - Error recovery and code fixing
-            result = self.create_chart_with_image(
-                chart_description=desc,
-                save_path=save_path,
-                data_files=csv_files,
-                data_columns_info=data_columns_info
-            )
+            # =================================================================================
+            # [CRITICAL FIX] Layer 3 Defense: Batch Loop Isolation
+            # Ensures that if Chart N crashes, Chart N+1 still runs.
+            # =================================================================================
+            try:
+                # Reuse existing single-chart generation logic
+                # This inherits all safety features:
+                # - P0-2 column validation guards
+                # - Automatic retry on failure (max_retries=3)
+                # - Error recovery and code fixing
+                result = self.create_chart_with_image(
+                    chart_description=desc,
+                    save_path=save_path,
+                    data_files=csv_files,
+                    data_columns_info=data_columns_info
+                )
 
-            results.append(result)
+                # Double check return type safety
+                if not isinstance(result, dict):
+                    result = {
+                        'description': desc,
+                        'code': None,
+                        'image_path': None,
+                        'success': False,
+                        'error': f"Invalid return type from create_chart_with_image: {type(result)}"
+                    }
 
-            # Log result
-            if result.get('success'):
-                print(f"     ✓ Chart {i+1} succeeded: {result.get('image_path')}")
-            else:
-                print(f"     ✗ Chart {i+1} failed: {result.get('error', 'Unknown error')}")
+                results.append(result)
+
+                # Log result
+                if result.get('success'):
+                    print(f"     ✓ Chart {i+1} succeeded: {result.get('image_path')}")
+                else:
+                    print(f"     ✗ Chart {i+1} failed: {result.get('error', 'Unknown error')}")
+
+            except Exception as e:
+                # [最后的防线] 捕获所有漏网之鱼
+                import traceback
+                error_trace = traceback.format_exc()
+                logger.critical(f"[create_charts_from_csv_files] Unhandled exception processing chart {i+1}: {e}\n{error_trace}")
+
+                print(f"     ☠️ Chart {i+1} CRASHED (Process recovered): {e}")
+
+                # 添加失败记录，保持索引一致
+                results.append({
+                    'description': desc,
+                    'code': None,
+                    'image_path': None,
+                    'success': False,
+                    'error': f"CRASH: {str(e)}"
+                })
+
+                # 关键：继续下一个循环
+                continue
 
         print(f"[ChartCreator] Complete: {sum(1 for r in results if r.get('success'))}/{len(results)} charts succeeded")
 

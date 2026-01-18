@@ -61,6 +61,26 @@ def evaluate_math_modeling(llm, solution_path):
         print("Error: can not load the solution file.")
         return
 
+    # =========================================================================
+    # [CRITICAL FIX] 数据结构自适应与类型检查
+    # =========================================================================
+    # Check if solution_data is a list and normalize it
+    if isinstance(solution_data, list):
+        print("[INFO] Detected list structure for solution, wrapping in 'tasks' dict.")
+        solution_data = {"tasks": solution_data}
+    elif isinstance(solution_data, dict):
+        if "tasks" not in solution_data:
+            # Try to handle single task or minimal solutions
+            if "problem_analysis" in solution_data or "mathematical_modeling" in solution_data:
+                print("[INFO] Single task solution detected, adding 'tasks' wrapper.")
+                solution_data = {"tasks": [solution_data]}
+            else:
+                print("[WARN] Solution dict missing 'tasks' key. Evaluation might fail.")
+    else:
+        print(f"[ERROR] Invalid solution data type: {type(solution_data)}")
+        return
+    # =========================================================================
+
     # evaluation
     problem_analysis_evaluation_prompt = generate_problem_analysis_prompt(solution_data)
     analysis_evaluation_results = llm(problem_analysis_evaluation_prompt)
