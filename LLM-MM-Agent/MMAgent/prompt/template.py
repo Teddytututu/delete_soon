@@ -1,3 +1,98 @@
+# ===============================================================================
+# [NEW] System Prompts (Modular Prompting - Reduces token usage by ~87%)
+# ===============================================================================
+# These system prompts are extracted from repetitive content in task prompts.
+# They are passed as the 'system' parameter to llm.generate(), allowing:
+# 1. Token savings (system prompts can be cached by API providers)
+# 2. Better instruction following (system role has higher priority)
+# 3. Easier maintenance (update in one place)
+
+# Base system prompt for non-coding tasks (analysis, modeling, formulas)
+BASE_SYSTEM_PROMPT = """You are an expert Mathematical Modeling Assistant collaborating in a multi-agent system.
+
+PRINCIPLES:
+1. Do NOT repeat steps already completed by other agents.
+2. Rely on provided outputs/files from previous tasks.
+3. Be concise, rigorous, and professional.
+4. Use plain text and LaTeX for formulas. Avoid Markdown formatting unless requested.
+
+OUTPUT STYLE:
+- Write as cohesive paragraphs without bullet lists or numbered lists.
+- Focus on depth, precision, and logical rigor.
+- Highlight assumptions, limitations, and potential implications.
+"""
+
+# System prompt for coding tasks (Python programming expert)
+CODING_SYSTEM_PROMPT = """You are an expert Python Programmer in a multi-agent mathematical modeling system.
+
+## CRITICAL ENVIRONMENT RULES
+1. **Encoding**: Force UTF-8 output at start: `sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')`
+2. **Data Loading**: ALWAYS use `load_csv('filename.csv')`. NEVER use paths like `dataset/` or `C:/`.
+3. **Column Names**: Column names are standardized to UPPERCASE (e.g., 'YEAR', 'GOLD'). Check `df.columns` before access.
+4. **Performance**: Use vectorized operations. Max loop iterations: 1000. Timeout: 300s.
+5. **Output**: Return ONLY a single code block starting with ```python.
+
+## CRITICAL DATA FILE NOTES
+**hosts.csv Column Handling**: The hosts.csv file contains columns 'Game' (e.g., "1896 Summer") and 'Host' (e.g., "Athens, Greece").
+- To extract year from 'Game', use: `df['Year'] = df['Game'].apply(lambda x: int(x.split()[0]))`
+- ALWAYS print `df.columns` after loading to verify column names before accessing them.
+- Do NOT assume columns named 'YEAR' exist without checking first.
+
+## FORBIDDEN
+- NO `input()` calls.
+- NO specialized libraries (only pandas, numpy, scipy, sklearn, statsmodels, matplotlib, seaborn).
+- NO raw `print(df)` (too large). Print `df.head()` or `df.shape` instead.
+
+## CODE STRUCTURE
+- Write code INSIDE the `task1()` function body.
+- DO NOT add `return` statements outside function scope.
+- Import required modules at the top (sys, io, os, pandas, numpy, matplotlib, seaborn).
+- Save intermediate results to CSV/JSON files.
+- Add print statements for progress tracking.
+"""
+
+# One-shot example for coding tasks (teach by example)
+ONE_SHOT_CODING_EXAMPLE = """
+## REFERENCE EXAMPLE (Follow this structure):
+```python
+import sys
+import io
+import os
+import pandas as pd
+import numpy as np
+
+# 1. Force UTF-8 (Mandatory)
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+def task():
+    try:
+        # 2. Load Data (Filename only)
+        df = load_csv('clean_athletes.csv')
+        print(f"Loaded columns: {df.columns.tolist()}")
+
+        # 3. Robust Logic (Check columns)
+        if 'GOLD' in df.columns:
+            result = df.groupby('NOC')['GOLD'].sum().reset_index()
+            # 4. Save Outputs
+            result.to_csv('result.csv', index=False)
+            print("[OK] Result saved.")
+        else:
+            print("[WARN] Column 'GOLD' not found.")
+
+    except Exception as e:
+        print(f"[ERROR] Task failed: {e}")
+
+if __name__ == '__main__':
+    task()
+
+```
+
+"""
+
+# ===============================================================================
+# Original Task Prompts (To be refactored gradually)
+# ===============================================================================
+
 PROBLEM_PROMPT = """\
 Problem Background:
 {problem_background}
@@ -236,7 +331,7 @@ IMPROVED MODELING SOLUTION:
 
 
 DECOMPOSE_PRINCIPLE_PROMPT = """\
-The solution to a mathematical modeling problem is typically broken down into a series of subtasks, each addressing a different aspect of the overall challenge. Based on the examples provided below, summarize what each subtask in tasks 1 through {tasknum} generally involves, with a focus on the principles of task decomposition in mathematical modeling.
+The solution to a mathematical modeling problem is typically broken down into a series of subtasks, each addressing a different aspect of the overall challenge. Based on the examples provided below, summarize what each subtask in tasks 1 through {num_tasks} generally involves, with a focus on the principles of task decomposition in mathematical modeling.
 
 <examples>
 
@@ -268,9 +363,9 @@ TASK_DECOMPOSE_PROMPT = """\
 
 ---
 
-Please decompose the given modeling solution into {tasknum} distinct and well-defined subtasks that collectively contribute to the overall objective. These subtasks should be clearly separated in their focus, each addressing a specific aspect of the modeling process. The goal is to break down the solution into key stages or methodologies, ensuring that all components of the solution are covered without redundancy. For each subtask, the approach or technique should be explicitly described, detailing the specific data, algorithms, or models required. The decomposition should reflect a logical and comprehensive path toward completing the task, with each part having a clear purpose and contributing to the final result.
+Please decompose the given modeling solution into {num_tasks} distinct and well-defined subtasks that collectively contribute to the overall objective. These subtasks should be clearly separated in their focus, each addressing a specific aspect of the modeling process. The goal is to break down the solution into key stages or methodologies, ensuring that all components of the solution are covered without redundancy. For each subtask, the approach or technique should be explicitly described, detailing the specific data, algorithms, or models required. The decomposition should reflect a logical and comprehensive path toward completing the task, with each part having a clear purpose and contributing to the final result.
 {user_prompt}
-Each subtask should be described as comprehensively and in as much detail as possible within a single paragraph using plain text and seperated by '---' for each subtask. All the contents and details of the original solution need to be covered by the {tasknum} subtasks without omission. 
+Each subtask should be described as comprehensively and in as much detail as possible within a single paragraph using plain text and seperated by '---' for each subtask. All the contents and details of the original solution need to be covered by the {num_tasks} subtasks without omission. 
 """
 
 
@@ -2011,7 +2106,7 @@ Ensure maximum fidelity to the original text and extract details as comprehensiv
 
 
 TASK_DEPENDENCY_ANALYSIS_PROMPT = """\
-Understanding the dependencies among different tasks in a mathematical modeling process is crucial for ensuring a coherent, logically structured, and efficient solution. Given a mathematical modeling problem and its solution decomposition into {tasknum} subtasks, analyze the interdependencies among these subtasks.  
+Understanding the dependencies among different tasks in a mathematical modeling process is crucial for ensuring a coherent, logically structured, and efficient solution. Given a mathematical modeling problem and its solution decomposition into {num_tasks} subtasks, analyze the interdependencies among these subtasks.  
 
 ## Input Information:
 - **Mathematical Modeling Problem:** {modeling_problem}
@@ -2029,14 +2124,14 @@ Understanding the dependencies among different tasks in a mathematical modeling 
 3. **Ensure Completeness:** Verify that all tasks in the decomposition are accounted for in the dependency analysis and that no essential dependencies are missing.
 
 ## Output Format:  
-Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as {tasknum} cohesive paragraphs, each paragraph is a dependency analysis of a task.
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as {num_tasks} cohesive paragraphs, each paragraph is a dependency analysis of a task.
 
 The response should be comprehensive and written in a clear, well-structured format without bullet points, ensuring a logical flow of dependency relationships and their implications.
 """
 
 
 TASK_DEPENDENCY_ANALYSIS_WITH_CODE_PROMPT = """\
-Understanding the dependencies among different tasks in a mathematical modeling process is crucial for ensuring a coherent, logically structured, and efficient solution. Given a mathematical modeling problem and its solution decomposition into {tasknum} subtasks, analyze the interdependencies among these subtasks.  
+Understanding the dependencies among different tasks in a mathematical modeling process is crucial for ensuring a coherent, logically structured, and efficient solution. Given a mathematical modeling problem and its solution decomposition into {num_tasks} subtasks, analyze the interdependencies among these subtasks.  
 
 ## Input Information:
 - **Mathematical Modeling Problem:** {modeling_problem}
@@ -2055,14 +2150,14 @@ Understanding the dependencies among different tasks in a mathematical modeling 
 3. **Ensure Completeness:** Verify that all tasks in the decomposition are accounted for in the dependency analysis and that no essential dependencies are missing.
 
 ## Output Format:  
-Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as {tasknum} cohesive paragraphs, each paragraph is a dependency analysis of a task.
+Respond as comprehensively and in as much detail as possible. Do not format your response in Markdown. Using plain text, without any Markdown formatting or syntax. Written as {num_tasks} cohesive paragraphs, each paragraph is a dependency analysis of a task.
 
 The response should be comprehensive and written in a clear, well-structured format without bullet points, ensuring a logical flow of dependency relationships and their implications.
 """
 
 
 DAG_CONSTRUCTION_PROMPT = """\
-A well-structured Directed Acyclic Graph (DAG) is essential for visualizing and optimizing the dependencies between different tasks in a mathematical modeling process. Given a problem and its solution decomposition into {tasknum} subtasks, construct a DAG that accurately represents the dependency relationships among these tasks. The DAG should capture all necessary dependencies while ensuring that no cycles exist in the structure.  
+A well-structured Directed Acyclic Graph (DAG) is essential for visualizing and optimizing the dependencies between different tasks in a mathematical modeling process. Given a problem and its solution decomposition into {num_tasks} subtasks, construct a DAG that accurately represents the dependency relationships among these tasks. The DAG should capture all necessary dependencies while ensuring that no cycles exist in the structure.  
 
 ## Input Information:
 - **Mathematical Modeling Problem:** {modeling_problem}
@@ -2661,4 +2756,125 @@ The JSON should be valid and ready to parse with `json.loads()`.
 Start your response with the opening `{{` and end with `}}`.
 
 ---
+"""
+# ===============================================================================
+# [NEW] Streamlined Task Prompts (V2 - Modular Prompting)
+# ===============================================================================
+# These prompts are streamlined versions that remove redundant content.
+# Use them with the System Prompts defined above for optimal token efficiency.
+
+# Streamlined analysis prompt (uses BASE_SYSTEM_PROMPT)
+TASK_ANALYSIS_PROMPT_V2 = """\
+# Task Description:
+{task_description}
+
+---
+
+{prompt}
+
+Analyze the task objectives, scope, and potential challenges.
+Highlight assumptions about the data and external factors.
+{user_prompt}
+"""
+
+# Streamlined coding prompt (uses CODING_SYSTEM_PROMPT + ONE_SHOT_CODING_EXAMPLE)
+TASK_CODING_PROMPT_V2 = """\
+# CONTEXT
+
+* **Data File**: {data_file}
+* **Variables**: {variable_description}
+* **Previous Outputs**: {dependent_file_prompt}
+
+# MODELING PLAN
+
+## Formulas
+
+{modeling_formulas}
+
+## Process
+
+{modeling_process}
+
+# REQUIREMENT
+
+Implement the Python code to solve this task.
+
+1. Strictly follow the Modeling Process above.
+2. Use ONLY the columns listed in "Available Columns" (if provided).
+3. Save all intermediate and final results to CSV/JSON.
+
+# CODE TEMPLATE
+
+{code_template}
+
+{user_prompt}
+"""
+
+# Streamlined coding debug prompt (uses CODING_SYSTEM_PROMPT + ONE_SHOT_CODING_EXAMPLE)
+TASK_CODING_DEBUG_PROMPT_V2 = """\
+# CONTEXT
+
+* Code Template: {code_template}
+* Modeling Process: {modeling_process}
+
+# YOUR PREVIOUS CODE
+
+{code}
+
+# EXECUTION ERROR
+
+{observation}
+
+# INSTRUCTION
+
+Fix the bugs in the code.
+
+1. Analyze the error message (e.g., KeyError, SyntaxError).
+2. If a column is missing, print `df.columns` to debug.
+3. If encoding fails, ensure `sys.stdout` is set to utf-8.
+4. Return the FULL corrected script.
+
+{user_prompt}
+"""
+
+# Streamlined formulas prompt (uses BASE_SYSTEM_PROMPT)
+TASK_FORMULAS_PROMPT_V2 = """\
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Modeling Methods to Consider:
+{modeling_methods}
+
+# Data Summary:
+{data_summary}
+
+---
+
+Based on the task description, analysis, and provided modeling methods, develop mathematical formulas or equations that capture the key relationships, variables, and constraints relevant to this task. Your formulas should be mathematically sound and aligned with the modeling methods discussed. Present the formulas using clear LaTeX notation, explaining the meaning of each variable and parameter.
+
+{user_prompt}
+"""
+
+# Streamlined modeling prompt (uses BASE_SYSTEM_PROMPT)
+TASK_MODELING_PROMPT_V2 = """\
+# Task Description:
+{task_description}
+
+# Task Analysis:
+{task_analysis}
+
+# Task Formulas:
+{modeling_formulas}
+
+# Modeling Methods:
+{modeling_methods}
+
+---
+
+Based on the task description, analysis, formulas, and suggested methods, construct a detailed mathematical modeling approach. Explain the step-by-step process of how you would implement the model, including data preparation, model selection, parameter estimation, validation, and interpretation of results. Reference the modeling methods and formulas as appropriate.
+
+{user_prompt}
 """

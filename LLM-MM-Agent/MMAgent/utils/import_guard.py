@@ -22,6 +22,9 @@ DEFAULT_IMPORT_WHITELIST = {
     'os', 'sys', 're', 'json', 'pathlib', 'datetime', 'collections',
     'itertools', 'math', 'statistics', 'random',
 
+    # [FIX 2026-01-18] Added standard library modules commonly used in data processing
+    'io', 'warnings', 'traceback',
+
     # Data manipulation (core)
     'pandas', 'numpy',
 
@@ -33,6 +36,10 @@ DEFAULT_IMPORT_WHITELIST = {
     'sklearn.linear_model',
     'sklearn.preprocessing',
     'sklearn.metrics',
+
+    # [FIX 2026-01-18] Added statsmodels and scipy for statistical analysis
+    'statsmodels', 'statsmodels.api', 'statsmodels.formula.api',
+    'scipy', 'scipy.stats',
 
     # FORBIDDEN in Task 1 (complex ML - causes dependency issues)
     # 'sklearn.decomposition',  # No PCA

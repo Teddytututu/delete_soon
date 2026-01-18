@@ -486,6 +486,32 @@ class TaskSolver(BaseAgent):
         self.code_history = {}  # Maps task_id -> list of (iteration, code) tuples
         self.error_history = {}  # Maps task_id -> list of (iteration, error_type, error_message) tuples
 
+    def execute_script(self, script_path: str, work_dir: str, timeout: int = None):
+        """
+        Execute a Python script using SecureScriptExecutor.
+
+        This method wraps SecureScriptExecutor to return a tuple (is_pass, output)
+        instead of raising exceptions, making it compatible with the coding() method.
+
+        Args:
+            script_path: Path to the Python script to execute
+            work_dir: Working directory for execution
+            timeout: Maximum execution time in seconds (None = use default 300s)
+
+        Returns:
+            tuple: (is_pass, output)
+                - is_pass (bool): True if execution succeeded, False otherwise
+                - output (str): Execution output on success, error message on failure
+        """
+        try:
+            executor = SecureScriptExecutor(logger_manager=self.logger_manager)
+            output = executor.execute(script_path, work_dir, timeout=timeout)
+            return True, output
+        except EnvException as e:
+            return False, str(e)
+        except Exception as e:
+            return False, f"Unexpected error during script execution: {e}"
+
     def analysis(self, prompt: str, task_description: str, user_prompt: str = ''):
         """Generate task analysis using streamlined prompt with base system prompt."""
         user_msg = safe_format(TASK_ANALYSIS_PROMPT_V2,

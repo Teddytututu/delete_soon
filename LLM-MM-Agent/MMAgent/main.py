@@ -4,6 +4,13 @@ import json
 import os
 import pickle
 
+# [FIX 2026-01-18] Add project root to sys.path to enable MMBench imports
+# This fixes ModuleNotFoundError: No module named 'MMBench'
+# Get the parent directory of MMAgent (i.e., LLM-MM-Agent root)
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 # [FIX 11.1] Use relative imports (standard Python practice)
 # Fallback to absolute imports for backward compatibility
 try:
@@ -19,10 +26,6 @@ except ImportError:
 # [FIX 14.1] Configure console encoding for all platforms using PlatformUtils
 # This prevents UnicodeEncodeError on Windows when printing special characters
 PlatformUtils.set_console_encoding()
-
-# [DELETE] [FIX 11.2] Removed sys.path modification - this is now handled by run.py
-# Old code: sys.path.insert(0, str(Path(__file__).parent.parent))
-# Reason: Environment configuration should be done in bootstrap script, not in business logic
 
 # [FIX 11.3] Use relative imports for remaining modules
 try:
