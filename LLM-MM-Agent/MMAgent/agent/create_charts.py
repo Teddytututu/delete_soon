@@ -21,6 +21,12 @@ from utils.chart_templates import render_chart_code, get_template_renderer
 # 问题3修复：导入公共路径AutoFix模块
 from utils.path_autofix import apply_path_autofix_with_validation
 
+# [NEW] LATENT REPORTER: Import for visual insights logging
+try:
+    from utils.latent_reporter import LatentReporter
+except ImportError:
+    LatentReporter = None  # Graceful degradation if not available
+
 logger = logging.getLogger(__name__)
 
 
@@ -657,13 +663,15 @@ class _ASTValidator(ast.NodeVisitor):
 
 
 class ChartCreator(BaseAgent):
-    def __init__(self, llm, logger_manager=None):
+    def __init__(self, llm, logger_manager=None, output_dir=None, task_id="General"):
         """
-        Initialize ChartCreator with optional logger manager.
+        Initialize ChartCreator with optional logger manager and LatentReporter.
 
         Args:
             llm: Language model instance
             logger_manager: Optional MMExperimentLogger instance for proper error logging
+            output_dir: Optional output directory path for LatentReporter integration
+            task_id: Optional task identifier for LatentReporter (default: "General")
         """
         super().__init__(llm, logger_manager)
         # Store module-level logger reference for backward compatibility
@@ -673,6 +681,21 @@ class ChartCreator(BaseAgent):
         self.allowed_files = set()  # 白名单：允许加载的文件名
         self.data_dir = ""  # 数据目录（用于构建绝对路径）
         self._data_context_set = False  # 标记是否已设置数据上下文
+
+        # [NEW] LATENT REPORTER: Initialize reporter for visual insights logging
+        self.reporter = None
+        self._output_dir = output_dir
+        self._task_id = task_id
+
+        if LatentReporter and output_dir:
+            try:
+                self.reporter = LatentReporter(output_dir, llm, task_id)
+                logger.info(f"[ChartCreator] LatentReporter initialized for task {task_id}")
+            except Exception as e:
+                logger.warning(f"[ChartCreator] Failed to initialize LatentReporter: {e}")
+                # Non-fatal: continue without reporter
+        else:
+            logger.debug(f"[ChartCreator] LatentReporter not available (LatentReporter={LatentReporter}, output_dir={output_dir})")
 
     def set_data_context(self, data_files: List[str], data_dir: str = None):
         """
@@ -2335,6 +2358,24 @@ Replace ALL invalid column references with valid ones from the available list.
                 if os.path.exists(save_path):
                     # File exists - genuine success
                     print(f"  [P2-1] File verified: {save_path} ({os.path.getsize(save_path)} bytes)")
+
+                    # [NEW] LATENT REPORTER: Log successful chart creation with image artifact
+                    if self.reporter:
+                        try:
+                            self.reporter.log_thought(
+                                stage="Data Visualization",
+                                raw_content=f"Generated chart to visualize: {chart_description}",
+                                status="SUCCESS",
+                                artifact={
+                                    "type": "image",
+                                    "path": save_path,
+                                    "description": chart_description
+                                }
+                            )
+                        except Exception as e:
+                            logger.warning(f"[ChartCreator] Failed to log chart success: {e}")
+                            # Non-fatal: continue without logging
+
                     return {
                         'description': chart_description,
                         'code': code,
@@ -2348,6 +2389,19 @@ Replace ALL invalid column references with valid ones from the available list.
                     error_msg = f"Code execution reported success but file not created at {save_path}"
                     print(f"  [P2-1] {error_msg}")
                     print(f"  [P2-1] Treating as FAILED despite execute_chart_code returning success=True")
+
+                    # [NEW] LATENT REPORTER: Log chart generation failure
+                    if self.reporter:
+                        try:
+                            self.reporter.log_thought(
+                                stage="Data Visualization",
+                                raw_content=f"Chart generation reported success but image file missing: {chart_description}\nError: {error_msg}",
+                                status="ERROR"
+                            )
+                        except Exception as e:
+                            logger.warning(f"[ChartCreator] Failed to log chart failure: {e}")
+                            # Non-fatal: continue without logging
+
                     return {
                         'description': chart_description,
                         'code': code,
@@ -2468,6 +2522,19 @@ Do NOT use '{missing_column}' - it doesn't exist!
 
         # All retries failed
         print(f"  [FAIL] Failed to generate chart after {max_retries} attempts")
+
+        # [NEW] LATENT REPORTER: Log final chart generation failure
+        if self.reporter:
+            try:
+                self.reporter.log_thought(
+                    stage="Data Visualization",
+                    raw_content=f"Failed to generate chart after {max_retries} attempts: {chart_description}\nFinal error: {message}",
+                    status="ERROR"
+                )
+            except Exception as e:
+                logger.warning(f"[ChartCreator] Failed to log chart failure: {e}")
+                # Non-fatal: continue without logging
+
         return {
             'description': chart_description,
             'code': code,

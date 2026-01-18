@@ -208,6 +208,36 @@ def run_mmbench_evaluation(key, evaluation_model, solution_path, output_dir, log
     return str(evaluation_dir)
 
 
+def get_tiered_dirs(output_dir):
+    """
+    Get three-tier directory structure paths.
+
+    [NEW] Returns a dictionary mapping tier names to their absolute paths.
+    This provides a centralized location for managing the new directory structure.
+
+    Args:
+        output_dir: Root output directory path
+
+    Returns:
+        dict: Dictionary with keys 'root', 'report', 'workspace', 'memory'
+    """
+    from pathlib import Path
+    output_path = Path(output_dir)
+
+    return {
+        'root': output_path,
+        'report': output_path / 'Report',
+        'workspace': output_path / 'Workspace',
+        'memory': output_path / 'Memory',
+        # Legacy mappings (for backward compatibility)
+        'json': output_path / 'json',
+        'markdown': output_path / 'markdown',
+        'latex': output_path / 'latex',
+        'evaluation': output_path / 'evaluation',
+        'usage': output_path / 'usage',
+    }
+
+
 def run(key, problem_path, config, name, dataset_path, output_dir, logger_manager,
         enable_latent_summary=False, enable_latent_summary_stages=None,
         enable_summary_cache=True, failure_handler=None):
@@ -230,9 +260,28 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
     Returns:
         Solution dictionary
     """
-    # Initialize execution tracker FIRST
-    tracker = get_tracker(output_dir, logger_manager)
+    # ==================== [THREE-TIER STRUCTURE] ====================
+    # 1. Define three-tier directory structure paths
+    from pathlib import Path
+    output_path = Path(output_dir)
+    dirs = {
+        "root": str(output_path),
+        "report": str(output_path / "Report"),
+        "workspace": str(output_path / "Workspace"),
+        "memory": str(output_path / "Memory"),
+    }
+
+    # 2. Ensure all directories exist (should already be created by utils.py,
+    #    but we verify here for safety in case run() is called directly)
+    for d_path in dirs.values():
+        os.makedirs(d_path, exist_ok=True)
+
     main_logger = logger_manager.get_logger('main')
+    main_logger.info(f"[STRUCTURE] Three-tier workspace: {output_dir}")
+    # ================================================================
+
+    # 3. Initialize execution tracker (put in Memory layer)
+    tracker = get_tracker(dirs["memory"], logger_manager)
 
     # Initialize LLM with tracker and latent summary option
     llm = LLM(config['model_name'], key, logger_manager=logger_manager, tracker=tracker,
@@ -253,9 +302,9 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
             main_logger.info("[WARNING] Without caching, API costs will be higher")
 
     # ==============================================================================
-    # [NEW] Checkpoint Path Definition
+    # [NEW] Checkpoint Path Definition (put in Memory layer)
     # ==============================================================================
-    checkpoint_dir = os.path.join(output_dir, 'checkpoints')
+    checkpoint_dir = os.path.join(dirs["memory"], 'checkpoints')
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_path = os.path.join(checkpoint_dir, 'pipeline_state.pkl')
 
@@ -385,7 +434,7 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
 
                 # Mathematical Modeling
                 task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt = \
-                    mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager)
+                    mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager, output_dir)
 
                 # Computational Solving
                 solution = computational_solving(
@@ -457,6 +506,17 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
 
         # Save usage data
         write_json_file(f'{output_dir}/usage/{name}.json', llm.get_total_usage())
+
+        # [NEW] LATENT REPORTER: Finalize research journal
+        # Add concluding footer with total duration and completion status
+        try:
+            from utils.latent_reporter import create_latent_reporter
+            temp_reporter = create_latent_reporter(output_dir, llm, name)
+            temp_reporter.finalize_journal()
+            main_logger.info("[LATENT REPORTER] Research journal finalized with completion footer.")
+        except Exception as e:
+            # Non-fatal: journal finalization failure should not crash the pipeline
+            main_logger.warning(f"[LATENT REPORTER] Failed to finalize journal: {e}")
 
         return solution
 

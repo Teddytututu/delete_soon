@@ -139,7 +139,7 @@ The dependencies for this task are analyzed as follows: {dependency_analysis_tex
     return task_analysis_prompt, task_formulas_prompt, task_modeling_prompt, dependent_file_prompt
 
 
-def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager=None):
+def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager=None, output_dir=None):
     """
     Perform mathematical modeling for a specific task.
 
@@ -152,6 +152,7 @@ def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coor
         coordinator: Coordinator instance for managing task dependencies
         with_code: Whether code execution is involved
         logger_manager: Optional MMExperimentLogger for structured logging
+        output_dir: Optional output directory path for LatentReporter integration
 
     Returns:
         Tuple of (task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt)
@@ -161,7 +162,8 @@ def mathematical_modeling(task_id, problem, task_descriptions, llm, config, coor
         logger_manager.log_progress(f"Task {task_id}: Mathematical Modeling", level='info')
 
     # CRITICAL FIX: Pass logger_manager to TaskSolver for proper error logging to errors.log
-    ts = TaskSolver(llm, logger_manager)
+    # LATENT REPORTER INTEGRATION: Pass output_dir and task_id for LLM-powered narrative logging
+    ts = TaskSolver(llm, logger_manager, output_dir=output_dir, task_id=str(task_id))
     mr = MethodRetriever(llm)
     task_analysis_prompt, task_formulas_prompt, task_modeling_prompt, dependent_file_prompt = get_dependency_prompt(with_code, coordinator, task_id)
 

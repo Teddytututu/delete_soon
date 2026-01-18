@@ -31,16 +31,70 @@ from utils.utils import robust_json_load
 logger = logging.getLogger(__name__)
 
 
+class SafePlaceholder:
+    """
+    Smart placeholder object to prevent template formatting crashes.
+
+    When a prompt template tries to access attributes of a missing variable
+    (e.g., {df.shape} when df is missing), this object intercepts the
+    attribute access and returns itself, preventing AttributeError.
+
+    Example:
+        If template contains "{data.shape}" but 'data' is missing:
+        - Returns SafePlaceholder('data')
+        - When .shape is accessed, returns self (SafePlaceholder)
+        - When converted to string, returns "{data}"
+
+    [CRITICAL FIX from chat with claude2.txt]
+    Prevents: AttributeError: 'str' object has no attribute 'shape'
+    """
+    def __init__(self, key):
+        self.key = key
+
+    def __str__(self):
+        return "{" + str(self.key) + "}"
+
+    def __repr__(self):
+        return str(self)
+
+    def __getattr__(self, name):
+        # Intercept all attribute access (like .shape, .columns, .head)
+        # Return self to prevent AttributeError
+        return self
+
+    def __getitem__(self, key):
+        # Intercept all index access (like ['column_name'])
+        # Return self to prevent TypeError
+        return self
+
+    def __call__(self, *args, **kwargs):
+        # Intercept callable access (like .head())
+        # Return self to prevent TypeError
+        return self
+
+    def __format__(self, format_spec):
+        # [FIX 2026-01-18] Handle format strings like {:.1f}, {:>10}, etc.
+        # When template has format specifiers like {elapsed:.1f} but variable is missing,
+        # return the placeholder string WITHOUT the format specifier to prevent crash
+        # This fixes: TypeError: unsupported format string passed to SafePlaceholder.__format__
+        return str(self)
+
+
 class _SafeDict(dict):
     """
-    Dictionary subclass that returns the placeholder itself for missing keys
-    BUT logs a warning to help developers find typos in templates.
+    Dictionary subclass that returns a SafePlaceholder for missing keys.
 
-    This prevents KeyError when template contains placeholders that aren't in kwargs.
-    Example: If template has "{name or func}" but kwargs doesn't have "name or func",
-    this returns "{name or func}" instead of crashing.
+    This prevents KeyError AND AttributeError when template contains
+    placeholders that aren't in kwargs or tries to access attributes.
 
-    [MODIFIED] Now emits warnings when keys are missing to aid debugging.
+    Example:
+        If template has "{df.shape}" but kwargs doesn't have "df":
+        - Returns SafePlaceholder('df')
+        - Template formatting continues without crash
+        - Warning emitted for debugging
+
+    [MODIFIED 2026-01-18] Now returns SafePlaceholder instead of string
+    to handle attribute access in templates (e.g., {df.shape}, {data.columns}).
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -55,9 +109,10 @@ class _SafeDict(dict):
         print(f"\033[93m{warning_msg}\033[0m")
         self.logger.warning(warning_msg)
 
-        # Still return the placeholder to prevent LLM call from crashing
-        # But now developers can see there's a template error
-        return "{" + key + "}"
+        # CRITICAL FIX: Return SafePlaceholder object instead of string
+        # This prevents crashes when template tries to access attributes
+        # like {df.shape} or {data.columns['col']}
+        return SafePlaceholder(key)
 
 
 def safe_format(template: str, **kwargs) -> str:
@@ -67,6 +122,9 @@ def safe_format(template: str, **kwargs) -> str:
     CRITICAL FIX: Uses format_map() with _SafeDict to prevent KeyError when template
     contains braces that aren't meant to be placeholders (e.g., code examples like
     "{name or func}" or f-string examples like "f'{len(df)}'").
+
+    [MODIFIED 2026-01-18] Now forces all non-string values to strings to prevent
+    Dict/List objects from interfering with format() via their braces {}.
 
     Args:
         template: Template string with placeholders like {key1}, {key2}, etc.
@@ -82,18 +140,18 @@ def safe_format(template: str, **kwargs) -> str:
         >>> safe_format(template, data_summary=data_summary, code=code)
         "Data: print(f'Result: {{result}}'), Code: x = 1"
     """
-    # Escape all braces in parameter values
+    # CRITICAL FIX: Force convert ALL values to strings and escape braces
+    # This prevents Dict/List objects (which contain {}) from interfering
+    # with the format() call and causing issues
     escaped_kwargs = {}
     for key, value in kwargs.items():
-        if isinstance(value, str):
-            # Replace { with {{ and } with }} to escape them
-            escaped_kwargs[key] = value.replace('{', '{{').replace('}', '}}')
-        else:
-            escaped_kwargs[key] = value
+        # Force convert to string, then escape braces
+        str_value = str(value)
+        escaped_kwargs[key] = str_value.replace('{', '{{').replace('}', '}}')
 
     # CRITICAL FIX: Use format_map() with _SafeDict instead of format()
     # This prevents KeyError for missing keys like "name or func"
-    # Missing placeholders will be preserved as-is for debugging
+    # Missing placeholders will be preserved as SafePlaceholder objects
     return template.format_map(_SafeDict(escaped_kwargs))
 
 
@@ -471,13 +529,16 @@ class EnvException(Exception):
 
 
 class TaskSolver(BaseAgent):
-    def __init__(self, llm, logger_manager=None):
+    def __init__(self, llm, logger_manager=None, output_dir=None, task_id=None, enable_latent_reporter=True):
         """
-        Initialize TaskSolver with optional logger manager.
+        Initialize TaskSolver with optional logger manager and latent reporter.
 
         Args:
             llm: Language model instance
             logger_manager: Optional MMExperimentLogger instance for proper error logging
+            output_dir: Optional output directory path for LatentReporter
+            task_id: Optional task identifier for LatentReporter
+            enable_latent_reporter: Whether to enable LLM-powered narrative logging (default: True)
         """
         super().__init__(llm, logger_manager)
 
@@ -486,14 +547,98 @@ class TaskSolver(BaseAgent):
         self.code_history = {}  # Maps task_id -> list of (iteration, code) tuples
         self.error_history = {}  # Maps task_id -> list of (iteration, error_type, error_message) tuples
 
+        # LATENT REPORTER INTEGRATION: Initialize LLM-powered narrative logging
+        self.enable_latent_reporter = enable_latent_reporter
+        self.reporter = None
+        self._output_dir = output_dir
+        self._task_id = task_id or "Unknown"
+
+        # Defer reporter initialization until output_dir is confirmed available
+        # (will be initialized lazily when first needed or explicitly via init_reporter())
+
+    def _init_reporter(self):
+        """
+        Initialize LatentReporter if not already initialized.
+
+        This is called lazily when first log attempt is made, to handle cases
+        where output_dir is not available during TaskSolver construction.
+        """
+        if not self.enable_latent_reporter:
+            return  # LatentReporter disabled
+
+        if self.reporter is not None:
+            return  # Already initialized
+
+        if self._output_dir is None:
+            logger.warning("Cannot initialize LatentReporter: output_dir not provided")
+            return
+
+        try:
+            from utils.latent_reporter import LatentReporter
+            self.reporter = LatentReporter(
+                output_dir=self._output_dir,
+                llm_client=self.llm,
+                task_id=self._task_id
+            )
+            logger.info(f"LatentReporter initialized for task {self._task_id}")
+        except Exception as e:
+            logger.error(f"Failed to initialize LatentReporter: {e}")
+            # Don't raise - allow pipeline to continue without reporter
+
+    def _log_thought(self, stage: str, content: str, status: str = "INFO", artifact: dict = None):
+        """
+        Log an event to the LatentReporter (if enabled).
+
+        This is a convenience wrapper that handles:
+        - Lazy initialization of reporter
+        - Checking if reporter is enabled
+        - Error handling (never crashes the pipeline)
+
+        Args:
+            stage: Current stage name (e.g., "Analysis", "Modeling", "Coding")
+            content: Raw technical content
+            status: Status (SUCCESS, WARNING, ERROR, INFO, THINKING)
+            artifact: Optional dict with "type", "path", "description"
+        """
+        if not self.enable_latent_reporter:
+            return  # Disabled by config
+
+        # Lazy initialization
+        if self.reporter is None:
+            self._init_reporter()
+
+        # Log if reporter is available
+        if self.reporter is not None:
+            try:
+                self.reporter.log_thought(stage, content, status, artifact)
+            except Exception as e:
+                # Never crash the pipeline due to reporter errors
+                logger.error(f"LatentReporter.log_thought() failed: {e}")
+
     def analysis(self, prompt: str, task_description: str, user_prompt: str = ''):
         """Generate task analysis using streamlined prompt with base system prompt."""
+        # LATENT REPORTER: Log analysis start
+        self._log_thought(
+            stage="Problem Analysis",
+            content=f"Starting task analysis for: {task_description[:100]}...",
+            status="INFO"
+        )
+
         user_msg = safe_format(TASK_ANALYSIS_PROMPT_V2,
                              prompt=prompt,
                              task_description=task_description,
                              user_prompt=user_prompt).strip()
         # [NEW] Pass BASE_SYSTEM_PROMPT as system parameter
-        return self.llm.generate(prompt=user_msg, system=BASE_SYSTEM_PROMPT)
+        result = self.llm.generate(prompt=user_msg, system=BASE_SYSTEM_PROMPT)
+
+        # LATENT REPORTER: Log analysis completion
+        self._log_thought(
+            stage="Problem Analysis",
+            content=f"Task analysis completed. Generated analysis for {task_description[:50]}...",
+            status="SUCCESS"
+        )
+
+        return result
     
     def formulas_actor(self, prompt: str, data_summary: str, task_description: str, task_analysis: str, modeling_methods: str, user_prompt: str = ''):
         """Generate mathematical formulas using streamlined prompt with base system prompt."""
@@ -516,13 +661,27 @@ class TaskSolver(BaseAgent):
         return self.llm.generate(prompt)
 
     def modeling(self, formulas_prompt: str, modeling_prompt: str, data_summary: str, task_description: str, task_analysis: str, modeling_methods: str, round: int = 1, user_prompt: str = ''):
+        # LATENT REPORTER: Log modeling start
+        self._log_thought(
+            stage="Mathematical Modeling",
+            content=f"Starting mathematical modeling with {round} refinement rounds",
+            status="INFO"
+        )
+
         formulas = self.formulas_actor(formulas_prompt, data_summary, task_description, task_analysis, modeling_methods, user_prompt)
         for i in range(round):
             formulas_critique = self.formulas_critic(data_summary, task_description, task_analysis, formulas)
             formulas = self.formulas_improvement(data_summary, task_description, task_analysis, formulas, formulas_critique, user_prompt)
-        
+
         modeling_method = self.modeling_actor(modeling_prompt, data_summary, task_description, task_analysis, formulas, modeling_methods, user_prompt)
-    
+
+        # LATENT REPORTER: Log modeling completion with actual formulas and method
+        self._log_thought(
+            stage="Mathematical Modeling",
+            content=f"**Formulas Derived**:\n{formulas}\n\n**Selected Method**:\n{modeling_method}",
+            status="SUCCESS"
+        )
+
         return formulas, modeling_method
 
     def modeling_actor(self, prompt: str, data_summary: str, task_description: str, task_analysis: str, formulas: str, modeling_methods: str = '', user_prompt: str = ''):
@@ -1204,6 +1363,13 @@ class TaskSolver(BaseAgent):
         Returns:
             (code, is_pass, output)
         """
+        # LATENT REPORTER: Log coding start
+        self._log_thought(
+            stage="Code Generation",
+            content=f"Starting code generation for {script_name}. Task: {task_description[:100]}...",
+            status="INFO"
+        )
+
         # CRITICAL FIX #8: Configuration
         MAX_TOTAL_RETRIES = 6  # Total attempts (was 15 with nested loops)
         current_code = None
@@ -1245,10 +1411,24 @@ class TaskSolver(BaseAgent):
                     # CRITICAL FIX #8: Intelligent error analysis
                     error_category, hint = self._analyze_error(last_error)
 
+                    # LATENT REPORTER: Log error analysis
+                    self._log_thought(
+                        stage="Code Debugging",
+                        content=f"Attempt {attempt}: Analyzing error - {error_category}. Last error: {last_error[:200]}...",
+                        status="WARNING"
+                    )
+
                     if error_category == "FATAL":
                         # Fatal error: stop immediately to save resources
                         print(f"[Attempt {attempt}/{MAX_TOTAL_RETRIES}] FATAL ERROR detected: {last_error[:100]}...")
                         print("[FATAL] Stopping retries to save tokens and API quota.")
+
+                        # LATENT REPORTER: Log fatal error
+                        self._log_thought(
+                            stage="Code Debugging",
+                            content=f"Fatal error encountered: {error_category}. {last_error[:300]}",
+                            status="ERROR"
+                        )
                         break  # Exit loop early
 
                     print(f"[Attempt {attempt}/{MAX_TOTAL_RETRIES}] Debugging ({error_category} error)...")
@@ -1297,6 +1477,14 @@ class TaskSolver(BaseAgent):
 
             if is_pass:
                 print(f"[Attempt {attempt}/{MAX_TOTAL_RETRIES}] ✅ SUCCESS! Code executed successfully.")
+
+                # LATENT REPORTER: Log success with artifact and output
+                self._log_thought(
+                    stage=f"Coding Complete: {script_name}",
+                    content=f"Successfully executed after {attempt} attempts.\nOutput: {output[:200]}",
+                    status="SUCCESS",
+                    artifact={"type": "code", "path": save_path, "description": f"Generated script: {script_name}"}
+                )
                 return current_code, True, output
 
             # --------------------------------------------------------------------
@@ -1319,18 +1507,57 @@ class TaskSolver(BaseAgent):
         fallback_code = best_code if best_code else current_code
         fallback_error = history[-1]['error'] if history else "Unknown error"
 
+        # LATENT REPORTER: Log final failure
+        self._log_thought(
+            stage="Code Execution",
+            content=f"All {MAX_TOTAL_RETRIES} attempts failed for {script_name}. Last error: {fallback_error[:300]}",
+            status="ERROR"
+        )
+
         return fallback_code, False, fallback_error
 
     def result(self, task_description: str, task_analysis: str, task_formulas: str, task_modeling: str, user_prompt: str = '', execution_result: str = ''):
+        # LATENT REPORTER: Log result generation start
+        self._log_thought(
+            stage="Result Generation",
+            content=f"Generating result summary for {task_description[:100]}...",
+            status="INFO"
+        )
+
         if execution_result == '':
             prompt = safe_format(TASK_RESULT_PROMPT, task_description=task_description, task_analysis=task_analysis, task_formulas=task_formulas, task_modeling=task_modeling, user_prompt=user_prompt).strip()
         else:
             prompt = safe_format(TASK_RESULT_WITH_CODE_PROMPT, task_description=task_description, task_analysis=task_analysis, task_formulas=task_formulas, task_modeling=task_modeling, user_prompt=user_prompt, execution_result=execution_result).strip()
-        return self.llm.generate(prompt)
+        result = self.llm.generate(prompt)
+
+        # LATENT REPORTER: Log result completion
+        self._log_thought(
+            stage="Result Generation",
+            content=f"Result summary generated for {task_description[:50]}...",
+            status="SUCCESS"
+        )
+
+        return result
 
     def answer(self, task_description: str, task_analysis: str, task_formulas: str, task_modeling: str, task_result: str, user_prompt: str = ''):
+        # LATENT REPORTER: Log answer generation start
+        self._log_thought(
+            stage="Answer Generation",
+            content=f"Generating final answer for {task_description[:100]}...",
+            status="INFO"
+        )
+
         prompt = safe_format(TASK_ANSWER_PROMPT, task_description=task_description, task_analysis=task_analysis, task_formulas=task_formulas, task_modeling=task_modeling, task_result=task_result, user_prompt=user_prompt).strip()
-        return self.llm.generate(prompt)
+        answer = self.llm.generate(prompt)
+
+        # LATENT REPORTER: Log answer completion
+        self._log_thought(
+            stage="Answer Generation",
+            content=f"Final answer generated for {task_description[:50]}...",
+            status="SUCCESS"
+        )
+
+        return answer
 
     def extract_code_structure(self, task_id, code: str, save_path: str):
         """

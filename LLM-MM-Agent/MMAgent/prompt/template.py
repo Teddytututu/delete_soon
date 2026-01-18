@@ -86,7 +86,7 @@ def task():
     try:
         # 2. Load Data (Filename only)
         df = load_csv('clean_athletes.csv')
-        print(f"Loaded columns: {df.columns.tolist()}")
+        print(f"Loaded columns: {{df.columns.tolist()}}")
 
         # 3. Robust Logic (Check columns)
         if 'GOLD' in df.columns:

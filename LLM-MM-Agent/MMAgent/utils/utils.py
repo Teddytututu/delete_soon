@@ -426,24 +426,57 @@ def get_info(args):
     run_dir_name = f"{args.task}_{timestamp}"
     output_dir = project_root / output_root_name / config["method_name"] / run_dir_name
 
-    # 4. Create Directories
+    # 4. Create Directories with Three-Tier Architecture
+    # NEW STRUCTURE: Report (presentation), Workspace (production), Memory (persistence)
     # Use pathlib mkdir with parents=True for robust recursive creation
     if not output_dir.exists():
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create subdirectories
-    required_subdirs = [
-        'logs', 'logs/debug', 'json', 'markdown', 'latex',
-        'code', 'charts', 'evaluation', 'usage'
-    ]
-    for subdir in required_subdirs:
-        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
+    # Define three-tier directory structure
+    tiered_dirs = {
+        # Tier 1: Report Layer - Core presentation and research artifacts
+        "Report": None,  # For 01_Research_Journal.md, final PDF
 
-    # 5. Initialize Logging
+        # Tier 2: Workspace Layer - Production output from agent operations
+        "Workspace": {
+            "code": None,      # Generated Python scripts (main1.py, main2.py, etc.)
+            "charts": None,    # Generated visualization images
+        },
+
+        # Tier 3: Memory Layer - State persistence and raw logs
+        "Memory": {
+            "logs": None,           # Execution logs (main.log, errors.log, etc.)
+            "debug": None,          # Debug-level logs
+            "checkpoints": None,    # Pipeline state checkpoints
+            "trace_stream": None,   # Raw execution tracker JSONL
+        },
+
+        # Legacy folders (for backward compatibility during transition)
+        "json": None,              # Structured JSON output
+        "markdown": None,          # Human-readable markdown output
+        "latex": None,             # LaTeX academic paper format
+        "evaluation": None,        # Evaluation results
+        "usage": None,             # API usage tracking
+    }
+
+    # Create all directories recursively
+    def create_tiered_dirs(base_path, structure):
+        """Recursively create directory structure."""
+        for name, children in structure.items():
+            dir_path = base_path / name
+            dir_path.mkdir(parents=True, exist_ok=True)
+            if children is not None:
+                create_tiered_dirs(dir_path, children)
+
+    create_tiered_dirs(output_dir, tiered_dirs)
+
+    # 5. Initialize Logging with Memory directory
+    # [NEW] Log files now go to Memory/logs instead of root/logs
     experiment_id = f"{args.task}_{timestamp}"
+    memory_dir = output_dir / "Memory"
     from .logging_config import MMExperimentLogger
     # Convert to string for LoggerManager compatibility
-    logger_manager = MMExperimentLogger(str(output_dir), experiment_id, console_level='INFO')
+    logger_manager = MMExperimentLogger(str(memory_dir), experiment_id, console_level='INFO')
 
     main_logger = logger_manager.get_logger('main')
     main_logger.info(f"{'='*80}")
