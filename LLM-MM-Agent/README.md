@@ -183,10 +183,10 @@ problem_modeling_round: 3
 task_formulas_round: 3
 
 # Number of subtasks to generate
-tasknum: 4
+num_tasks: 4
 
 # Number of charts per task
-chart_num: 3
+num_charts: 3
 
 # Number of methods to retrieve from HMML
 top_method_num: 6

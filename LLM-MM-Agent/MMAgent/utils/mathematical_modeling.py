@@ -2,69 +2,140 @@ from agent.retrieve_method import MethodRetriever
 from agent.task_solving import TaskSolver
 from prompt.template import TASK_ANALYSIS_APPEND_PROMPT, TASK_FORMULAS_APPEND_PROMPT, TASK_MODELING_APPEND_PROMPT
 
+# CRITICAL FIX: Context Pruning Strategy (from gemini 1.txt analysis)
+# Implements character-based truncation to prevent context overflow
+# Distinguishes between immediate predecessors (task_id - 1) and earlier dependencies
+# See: test workplace/docs/41_context_pruning_analysis.md
+
 
 def get_dependency_prompt(with_code, coordinator, task_id):
+    """
+    Generate dependency context with intelligent truncation to prevent context overflow.
+
+    Strategy:
+    - Immediate predecessor (task_id - 1): Full context with character limits
+    - Earlier dependencies: Minimal context (only result interpretation)
+
+    Args:
+        with_code: Whether to include code structure information
+        coordinator: Coordinator instance with memory and code_memory
+        task_id: Current task ID
+
+    Returns:
+        Tuple of (task_analysis_prompt, task_formulas_prompt, task_modeling_prompt, dependent_file_prompt)
+    """
+    # Ensure task_id is integer for comparison
+    try:
+        current_id_int = int(task_id)
+    except ValueError:
+        current_id_int = 999999  # Fallback for non-integer task_id
+
     task_dependency = [int(i) for i in coordinator.DAG[str(task_id)]]
     dependent_file_prompt = ""
+
     if len(task_dependency) > 0:
-        # P2-8 FIX: Defensive bounds checking for task_dependency_analysis array
-        # Prevents IndexError when task_id - 1 is out of bounds
+        # Use dictionary mapping instead of list indexing to prevent IndexError
+        # This prevents KeyError when task_id is not sequential (e.g., [1, 3, 5])
         dependency_analysis_text = ""
-        if hasattr(coordinator, 'task_dependency_analysis'):
-            if coordinator.task_dependency_analysis is not None:
-                # Check if task_id - 1 is within valid range
-                if 0 <= (task_id - 1) < len(coordinator.task_dependency_analysis):
-                    dependency_analysis_text = coordinator.task_dependency_analysis[task_id - 1]
-                else:
-                    # Index out of bounds - use generic message
-                    dependency_analysis_text = f"Tasks {task_dependency} (dependency analysis not available for task {task_id})"
+        if hasattr(coordinator, 'task_dependency_analysis') and coordinator.task_dependency_analysis:
+            analysis_dict = {str(i+1): txt for i, txt in enumerate(coordinator.task_dependency_analysis)}
+            task_id_str = str(task_id)
+            if task_id_str in analysis_dict:
+                dependency_analysis_text = analysis_dict[task_id_str]
             else:
-                dependency_analysis_text = f"Tasks {task_dependency} (no dependency analysis performed)"
+                dependency_analysis_text = f"Tasks {task_dependency} (Analysis unavailable)"
         else:
-            dependency_analysis_text = f"Tasks {task_dependency} (dependency tracking not initialized)"
+            dependency_analysis_text = f"Tasks {task_dependency} (No dependency analysis)"
 
         dependency_prompt = f"""\
-This task is Task {task_id}, which depends on the following tasks: {task_dependency}. The dependencies for this task are analyzed as follows: {dependency_analysis_text}
+This task is Task {task_id}, which depends on the following tasks: {task_dependency}.
+The dependencies for this task are analyzed as follows: {dependency_analysis_text}
 """
-        for id in task_dependency:
-            dependency_prompt += f"""\
----
-# The Description of Task {id}:
-{coordinator.memory[str(id)]['task_description']}
-# The modeling method for Task {id}:
-{coordinator.memory[str(id)]['mathematical_modeling_process']}
-"""
+
+        # Context Pruning Strategy: Implement "远近亲疏" (near/far) strategy
+        for dep_id in task_dependency:
+            dep_id_str = str(dep_id)
+
+            # Use .get() for safe access, return empty dict if key not found
+            task_mem = coordinator.memory.get(dep_id_str, {})
+            code_mem = coordinator.code_memory.get(dep_id_str, {}) if with_code else {}
+
+            # Check if this is the immediate predecessor (task_id - 1)
+            # Immediate predecessors get more detailed context
+            is_immediate = (dep_id == current_id_int - 1)
+
+            # Define truncation limits based on dependency type
+            # Immediate: full context with limits
+            # Earlier: minimal context (results only)
+            MAX_LEN_DESC = 1000 if is_immediate else 0
+            MAX_LEN_PROCESS = 1000 if is_immediate else 0
+            MAX_LEN_RESULT = 2000 if is_immediate else 500
+            MAX_LEN_CODE = 2000 if is_immediate else 0
+
+            # Helper function for safe truncation
+            def get_trunc(key, limit):
+                """Safely get and truncate a value from task memory."""
+                val = str(task_mem.get(key, ''))
+                if limit == 0:
+                    return ""
+                if len(val) > limit:
+                    return val[:limit] + f"... (truncated, total {len(val)} chars)"
+                return val
+
+            # Build dependency prompt section
+            dependency_prompt += f"\n--- Dependency: Task {dep_id} ---\n"
+
+            # 1. Task Description (immediate predecessor only)
+            if is_immediate:
+                desc = get_trunc('task_description', MAX_LEN_DESC)
+                if desc:
+                    dependency_prompt += f"# Description:\n{desc}\n"
+
+            # 2. Modeling Process (immediate predecessor only)
+            if is_immediate:
+                process = get_trunc('mathematical_modeling_process', MAX_LEN_PROCESS)
+                if process:
+                    dependency_prompt += f"# Modeling Method:\n{process}\n"
+
+            # 3. Result Interpretation (all dependencies, but different lengths)
+            result = get_trunc('solution_interpretation', MAX_LEN_RESULT)
+            if result:
+                dependency_prompt += f"# Result/Conclusion:\n{result}\n"
+
+            # 4. Code-related information (if requested)
             if with_code:
-                dependency_prompt += f"""\
-# The structure of code for Task {id}:
-{coordinator.code_memory[str(id)]}
-# The result for Task {id}:
-{coordinator.memory[str(id)]['solution_interpretation']}
----
-"""
-                dependent_file_prompt += f"""\
-# The files generated by code for Task {id}:
-{coordinator.code_memory[str(id)]}
-"""
-                # Safer: explicitly include file outputs if present
-                file_outputs = coordinator.code_memory.get(str(id), {}).get('file_outputs', [])
+                # Code structure: only for immediate predecessor
+                if is_immediate:
+                    code_struct_str = str(code_mem)
+                    if len(code_struct_str) > MAX_LEN_CODE:
+                        code_struct_str = code_struct_str[:MAX_LEN_CODE] + "... (structure truncated)"
+                    if code_struct_str and code_struct_str != "{}":
+                        dependency_prompt += f"# Code Structure:\n{code_struct_str}\n"
+
+                # CRITICAL: File outputs must ALWAYS be preserved for all dependencies
+                # Even early tasks' files may be needed by current task
+                file_outputs = code_mem.get('file_outputs', []) if isinstance(code_mem, dict) else []
                 if file_outputs:
-                    dependent_file_prompt += f"\n# File outputs list for Task {id}:\n{file_outputs}\n"
-            else:
-                dependency_prompt += f"""\
-# The result for Task {id}:
-{coordinator.memory[str(id)]['solution_interpretation']}
----
-"""
-                
+                    file_info = f"Task {dep_id} generated files: {file_outputs}"
+                    dependent_file_prompt += f"\n# Files from Task {dep_id}:\n{file_outputs}\n"
+                    # Also mention in main dependency prompt
+                    dependency_prompt += f"# Generated Files:\n{file_outputs}\n"
+
+            dependency_prompt += "---\n"
+
+    else:
+        # No dependencies case
+        task_analysis_prompt = ""
+        task_formulas_prompt = ""
+        task_modeling_prompt = ""
+        # dependent_file_prompt already initialized as ""
+
+    # Only append prompts if there are dependencies
     if len(task_dependency) > 0:
         task_analysis_prompt = dependency_prompt + TASK_ANALYSIS_APPEND_PROMPT
         task_formulas_prompt = dependency_prompt + TASK_FORMULAS_APPEND_PROMPT
         task_modeling_prompt = dependency_prompt + TASK_MODELING_APPEND_PROMPT
-    else:
-        task_analysis_prompt = ""
-        task_formulas_prompt = ""
-        task_modeling_prompt = ""
+
     return task_analysis_prompt, task_formulas_prompt, task_modeling_prompt, dependent_file_prompt
 
 
