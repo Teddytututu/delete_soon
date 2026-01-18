@@ -28,6 +28,9 @@
 #   - Check available columns first: print(df.columns.tolist())
 # ============================================================================
 
+# [FIX 2026-01-18] Added sys and io for UTF-8 encoding support
+import sys
+import io
 import pandas as pd
 import os
 from pathlib import Path

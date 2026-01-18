@@ -2471,6 +2471,71 @@ Do NOT use '{missing_column}' - it doesn't exist!
             'error': message
         }
 
+    def create_charts_from_csv_files(self, chart_descriptions: list, save_dir: str, csv_files: list, data_columns_info: str = None):
+        """
+        Batch chart generator from CSV files.
+
+        Thin wrapper around create_chart_with_image() that processes multiple
+        chart descriptions sequentially. Each chart is generated independently,
+        with failures in one chart not affecting others.
+
+        Args:
+            chart_descriptions (list): List of chart description strings
+            save_dir (str): Directory to save chart images (created if doesn't exist)
+            csv_files (list): List of CSV file paths to use as data sources
+            data_columns_info (str, optional): Pre-extracted column information
+
+        Returns:
+            list: List of chart result dictionaries, one per description.
+                  Each dict contains: {
+                      'description': str,
+                      'code': str,
+                      'image_path': str,
+                      'success': bool,
+                      'error': str
+                  }
+        """
+        import os
+        results = []
+
+        # Ensure save directory exists
+        os.makedirs(save_dir, exist_ok=True)
+
+        print(f"[ChartCreator] Processing {len(chart_descriptions)} charts via create_charts_from_csv_files")
+        print(f"[ChartCreator] Save directory: {save_dir}")
+        print(f"[ChartCreator] CSV files: {len(csv_files)}")
+
+        # Process each chart description
+        for i, desc in enumerate(chart_descriptions):
+            # Generate output filename: chart_1.png, chart_2.png, etc.
+            save_path = os.path.join(save_dir, f"chart_{i+1}.png")
+
+            print(f"  -> Generating Chart {i+1}/{len(chart_descriptions)}: {save_path}")
+
+            # Reuse existing single-chart generation logic
+            # This inherits all safety features:
+            # - P0-2 column validation guards
+            # - Automatic retry on failure (max_retries=3)
+            # - Error recovery and code fixing
+            result = self.create_chart_with_image(
+                chart_description=desc,
+                save_path=save_path,
+                data_files=csv_files,
+                data_columns_info=data_columns_info
+            )
+
+            results.append(result)
+
+            # Log result
+            if result.get('success'):
+                print(f"     ✓ Chart {i+1} succeeded: {result.get('image_path')}")
+            else:
+                print(f"     ✗ Chart {i+1} failed: {result.get('error', 'Unknown error')}")
+
+        print(f"[ChartCreator] Complete: {sum(1 for r in results if r.get('success'))}/{len(results)} charts succeeded")
+
+        return results
+
     def _validate_column_usage(self, code: str, available_columns: set) -> Tuple[bool, List[str]]:
         """
         验证生成的代码只使用了可用的列名
