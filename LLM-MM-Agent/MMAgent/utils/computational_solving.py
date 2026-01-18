@@ -424,7 +424,8 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
     charts = minimal_cc.create_charts_from_csv_files(
         chart_descriptions=chart_descriptions,
         save_dir=charts_dir,
-        csv_files=data_files if data_files else all_plottable_files  # CRITICAL FIX #5: Use unified file list
+        csv_files=data_files if data_files else all_plottable_files,  # CRITICAL FIX #5: Use unified file list
+        data_columns_info=data_columns_info
     )
 
     # MINIMAL CHART FIX: Normalize charts to minimal structure

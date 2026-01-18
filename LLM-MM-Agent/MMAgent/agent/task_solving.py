@@ -550,9 +550,14 @@ class TaskSolver(BaseAgent):
         # CRITICAL FIX: Initialize new_content to prevent UnboundLocalError
         new_content = None
 
-        # [NEW] Use streamlined TASK_CODING_PROMPT_V2
-        user_msg = safe_format(TASK_CODING_PROMPT_V2,
+        # BUG FIX #6: Use TASK_CODING_PROMPT (V1) consistently
+        # Previously used V2 for initial generation but V1 for retry,
+        # causing version inconsistency. V1 provides more context
+        # (task_description, task_analysis, data_summary) which
+        # improves code generation quality and error recovery.
+        user_msg = safe_format(TASK_CODING_PROMPT,
                             data_file=data_file,
+                            data_summary=data_summary,
                             variable_description=variable_description,
                             task_description=task_description,
                             task_analysis=task_analysis,

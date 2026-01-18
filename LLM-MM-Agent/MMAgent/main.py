@@ -90,13 +90,27 @@ def run_mmbench_evaluation(key, evaluation_model, solution_path, output_dir, log
     Returns:
         Path to evaluation results directory
     """
-    from MMBench.evaluation.model import gpt
-    from MMBench.evaluation.prompts import (
-        generate_problem_analysis_prompt,
-        generate_modeling_rigorousness_prompt,
-        generate_practicality_and_scientificity_prompt,
-        generate_result_and_bias_analysis_prompt
-    )
+    # BUG FIX #5: Ensure MMBench is in sys.path before importing
+    # This prevents "No module named 'MMBench'" errors when running
+    # from different directories or with different working directories.
+    try:
+        from MMBench.evaluation.model import gpt
+        from MMBench.evaluation.prompts import (
+            generate_problem_analysis_prompt,
+            generate_modeling_rigorousness_prompt,
+            generate_practicality_and_scientificity_prompt,
+            generate_result_and_bias_analysis_prompt
+        )
+    except ImportError as e:
+        main_logger = logger_manager.get_logger('main')
+        main_logger.error(f"[ERROR] Failed to import MMBench: {e}")
+        main_logger.error(f"[ERROR] Current sys.path: {sys.path}")
+        main_logger.error(f"[ERROR] Project root: {_project_root}")
+        main_logger.error(f"[ERROR] MMBench exists: {(_project_root / 'MMBench').exists()}")
+        raise ImportError(
+            f"Cannot import MMBench. Ensure you're running from LLM-MM-Agent directory. "
+            f"Project root: {_project_root}, MMBench exists: {(_project_root / 'MMBench').exists()}"
+        ) from e
 
     main_logger = logger_manager.get_logger('main')
 

@@ -25,6 +25,9 @@
 # from ... import ...
 
 # The model class
+import sys
+import io
+
 class Model():
     pass
 

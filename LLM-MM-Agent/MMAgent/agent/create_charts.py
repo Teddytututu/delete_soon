@@ -543,7 +543,8 @@ class ChartCodeValidator:
         import pandas as pd
         import numpy as np
         from pathlib import Path
-        import os
+        # [FIX 2026-01-18] Removed local import os - use global import from line 5
+        # This prevents shadow variable issues and UnboundLocalError
         import builtins
 
         # Full builtins - no restrictions
@@ -1007,7 +1008,9 @@ class ChartCreator(BaseAgent):
         Returns:
             str: JSON configuration string
         """
-        from string import Template
+        # BUG FIX #3: Removed local 'from string import Template'
+        # Global import already exists at line 4. Local import creates
+        # shadow variable that can cause "local variable referenced before assignment"
         from prompt.template import CHART_TO_JSON_PROMPT
 
         logger.info("[P1-6] Using JSON-based chart configuration method")
@@ -1357,7 +1360,8 @@ class ChartCreator(BaseAgent):
             import pandas as pd
             import numpy as np
             from pathlib import Path
-            import os
+            # [FIX 2026-01-18] Removed local import os - use global import from line 5
+            # This prevents shadow variable issues and UnboundLocalError
             import re
 
             # ======== P0 FIX #1: DATA_DIR injection (DEPRECATED - Using CodeExecutionGuards instead) ========
@@ -2326,7 +2330,8 @@ Replace ALL invalid column references with valid ones from the available list.
 
                 # P2-1 FIX: Verify file actually exists before reporting success
                 # This prevents "success=True but file missing" issues
-                import os
+                # NOTE: os is imported at module level (line 5), no need to re-import here
+                # Re-importing would cause UnboundLocalError due to Python's scoping rules
                 if os.path.exists(save_path):
                     # File exists - genuine success
                     print(f"  [P2-1] File verified: {save_path} ({os.path.getsize(save_path)} bytes)")
@@ -2495,7 +2500,7 @@ Do NOT use '{missing_column}' - it doesn't exist!
                       'error': str
                   }
         """
-        import os
+        # NOTE: os is imported at module level (line 5), no need to re-import here
         results = []
 
         # Ensure save directory exists

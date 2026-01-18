@@ -15,7 +15,8 @@ bcrypt>=4.0.0
 
 # Scientific computing (Updated for Python 3.10+ and Pandas 2.x compatibility)
 # [FIX 2026-01-18] Relaxed numpy constraints for better compatibility
-numpy>=1.24.0,<2.0.0
+# [FIX 2026-01-18] Removed upper version bound to prevent installation failures
+numpy>=1.24.0
 scipy>=1.10.0,<2.0.0
 pandas>=2.0.0,<2.2.0
 pyarrow>=12.0.0,<15.0.0

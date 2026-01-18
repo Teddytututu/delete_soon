@@ -8,13 +8,20 @@ PROBLEM: LLM generates code with full Windows paths like:
 SOLUTION: Lock all CSV paths to a single DATA_DIR.
 All code uses just filenames, system handles path resolution.
 
+CRITICAL FIX #5: Unify Data Source Management
+- Integrated canonical whitelist into DataManager
+- Added work_dir for separating input/output files
+- Unified schema scanning through SchemaRegistry
+- Single source of truth for data file management
+
 Author: Engineering Fix
 Date: 2026-01-15
+Updated: 2026-01-17 (Critical Fix #5)
 """
 
 import os
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,7 +29,13 @@ logger = logging.getLogger(__name__)
 
 class DataManager:
     """
-    Centralized data file path manager.
+    CRITICAL FIX #5: Project's 'Unique Data Commander'.
+
+    Single source of truth for data file management:
+    - Canonical input file whitelist (ONLY place to define allowed files)
+    - Work directory for task-generated outputs
+    - Unified schema scanning through SchemaRegistry
+    - Separation of input data vs task outputs
 
     Enforces single DATA_DIR policy:
     - All CSV files live in DATA_DIR
@@ -43,11 +56,29 @@ class DataManager:
             # Default: current directory
             self.data_dir = Path.cwd()
 
+        # CRITICAL FIX #5: Unique whitelist definition
+        # This is the ONLY place where canonical input files are defined
+        # If you need to add/remove data files, change ONLY this set
+        self.CANONICAL_INPUT_FILES: Set[str] = {
+            'clean_athletes.csv',
+            'clean_hosts.csv',
+            'clean_medal_counts.csv',
+            'clean_programs.csv'
+        }
+
+        # Work directory for task-generated outputs (separate from input data)
+        self.work_dir: Optional[Path] = None
+
         logger.info(f"[DataManager] Initialized with DATA_DIR: {self.data_dir}")
+        logger.info(f"[DataManager] Canonical input files: {sorted(self.CANONICAL_INPUT_FILES)}")
 
         # Verify directory exists
         if not self.data_dir.exists():
             logger.warning(f"[DataManager] DATA_DIR does not exist: {self.data_dir}")
+
+        # Lazy initialization of SchemaRegistry and SchemaManager
+        self._registry = None
+        self._schema_manager = None
 
     def get_full_path(self, filename: str) -> Path:
         """
@@ -237,6 +268,143 @@ class DataManager:
                 result['unreadable_files'].append(filename)
 
         return result
+
+    # ========================================================================
+    # CRITICAL FIX #5: Enhanced Methods for Unified Data Management
+    # ========================================================================
+
+    def set_work_dir(self, work_dir: str):
+        """
+        Set the working directory for task-generated outputs.
+
+        This allows DataManager to distinguish between:
+        - Input data: Original files in data_dir (whitelist managed)
+        - Task outputs: Generated files in work_dir (auto-discovered)
+
+        Args:
+            work_dir: Path to directory where task generates CSV files
+        """
+        self.work_dir = Path(work_dir).resolve()
+        logger.info(f"[DataManager] Work directory set to: {self.work_dir}")
+
+    def get_canonical_input_files(self) -> List[Path]:
+        """
+        Get canonical input data files (whitelist filtered).
+
+        Returns:
+            List of Path objects for files that are BOTH in data_dir AND in CANONICAL_INPUT_FILES
+        """
+        if not self.data_dir.exists():
+            return []
+
+        valid_files = []
+        for f in self.data_dir.iterdir():
+            if f.name in self.CANONICAL_INPUT_FILES:
+                valid_files.append(f)
+
+        logger.debug(f"[DataManager] Found {len(valid_files)} canonical input files")
+        return valid_files
+
+    def get_task_generated_files(self) -> List[Path]:
+        """
+        Get task-generated CSV files (excluding input data).
+
+        Returns:
+            List of Path objects for CSV files in work_dir that are NOT in CANONICAL_INPUT_FILES
+        """
+        if not self.work_dir or not self.work_dir.exists():
+            return []
+
+        # Filter out canonical input files, return only newly generated files
+        output_files = [
+            f for f in self.work_dir.glob('*.csv')
+            if f.name not in self.CANONICAL_INPUT_FILES
+        ]
+
+        logger.debug(f"[DataManager] Found {len(output_files)} task-generated files")
+        return output_files
+
+    def get_comprehensive_schema_info(self) -> str:
+        """
+        Scan input and output data, generate schema description for LLM.
+
+        This is the UNIFIED entry point for schema scanning:
+        1. Scans canonical input files
+        2. Scans task-generated files
+        3. Returns formatted schema information for LLM prompts
+
+        Returns:
+            Formatted string with schema information (via SchemaRegistry.format_for_prompt())
+        """
+        # Lazy import to avoid circular dependencies
+        from .schema_registry import SchemaRegistry
+
+        if self._registry is None:
+            self._registry = SchemaRegistry()
+
+        # Step 1: Scan canonical input data
+        input_files = self.get_canonical_input_files()
+        if input_files:
+            input_count = self._registry.scan_files(
+                [str(f) for f in input_files],
+                source='input_data'
+            )
+            logger.info(f"[DataManager] Scanned {input_count} input data files")
+
+        # Step 2: Scan task-generated outputs
+        output_files = self.get_task_generated_files()
+        if output_files:
+            output_count = self._registry.scan_files(
+                [str(f) for f in output_files],
+                source='task_output'
+            )
+            logger.info(f"[DataManager] Scanned {output_count} task output files")
+
+        # Step 3: Format for prompt
+        schema_info = self._registry.format_for_prompt()
+        logger.debug(f"[DataManager] Generated schema info ({len(schema_info)} chars)")
+
+        return schema_info
+
+    def read_safe_csv(self, filename: str):
+        """
+        Unified CSV reading entry point with automatic path resolution.
+
+        Priority order:
+        1. work_dir/filename (task-generated output)
+        2. data_dir/filename (canonical input data)
+
+        Args:
+            filename: Name of the CSV file (just filename, not path)
+
+        Returns:
+            DataFrame with standardized column names
+
+        Raises:
+            FileNotFoundError: If file not found in any directory
+        """
+        from .data_normalization import read_csv_with_normalized_columns
+
+        # Priority 1: Try work_dir (task outputs)
+        if self.work_dir and self.work_dir.exists():
+            work_path = self.work_dir / filename
+            if work_path.exists():
+                logger.debug(f"[DataManager] Reading {filename} from work_dir")
+                return read_csv_with_normalized_columns(work_path)
+
+        # Priority 2: Try data_dir (input data)
+        data_path = self.data_dir / filename
+        if data_path.exists():
+            logger.debug(f"[DataManager] Reading {filename} from data_dir")
+            return read_csv_with_normalized_columns(data_path)
+
+        # Not found anywhere
+        raise FileNotFoundError(
+            f"Data file '{filename}' not found in work_dir or data_dir.\n"
+            f"Searched:\n"
+            f"  - {self.work_dir / filename if self.work_dir else 'N/A'}\n"
+            f"  - {data_path}"
+        )
 
 
 # Global instance (will be initialized in main.py)

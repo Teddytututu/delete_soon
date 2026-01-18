@@ -1,12 +1,34 @@
 """
 Canonical CSV Whitelist Manager - P0-1 FIX
 
+⚠️  **DEPRECATED** - CRITICAL FIX #5 (2026-01-17)
+----------------------------------------------------
+This module is DEPRECATED. All functionality has been migrated to
+DataManager (utils/data_manager.py).
+
+Migration Guide:
+- OLD: CSVWhitelistManager.get_canonical_files()
+- NEW: DataManager.get_canonical_input_files()
+
+- OLD: CANONICAL_CSV_FILES (global constant)
+- NEW: DataManager.CANONICAL_INPUT_FILES
+
+The DataManager is now the 'Unique Data Commander' - the single source
+of truth for all data file management.
+
+This file is kept for backward compatibility only.
+DO NOT USE FOR NEW CODE.
+
+----------------------------------------------------
+Original Documentation:
+
 Enforces a single canonical set of CSV files.
 Prevents confusion between clean_/cleaned_/clean_summerOly_ versions.
 
 Author: Engineering Fix
 Date: 2026-01-16
 Priority: P0 (Chart generation stability)
+Deprecated: 2026-01-17
 """
 
 import os
@@ -15,6 +37,40 @@ from pathlib import Path
 from typing import List, Set, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# PYTHON IMPORT WHITELIST
+# ============================================================================
+
+# CRITICAL FIX: Add ALLOWED_IMPORTS for code security validation
+# This whitelist defines which Python modules are allowed to be imported
+# in generated code. Prevents malicious code execution.
+ALLOWED_IMPORTS = {
+    # Data manipulation
+    'pandas', 'numpy', 'scipy', 'sklearn', 'statsmodels',
+    # Visualization
+    'matplotlib', 'seaborn', 'plotly',
+    # Math and statistics
+    'math', 'random', 'statistics',
+    # Date and time
+    'datetime', 'calendar', 'time',
+    # Data structures
+    'collections', 'itertools', 'functools', 'heapq', 'operator',
+    # String and text processing
+    'string', 're', 'textwrap',
+    # File I/O
+    'io', 'json', 'csv', 'pickle',
+    # System and OS
+    'sys', 'os', 'pathlib', 'shutil',
+    # Debugging
+    'warnings', 'traceback', 'logging',
+    # Utilities
+    'typing', 'dataclasses', 'enum',
+    # Scientific computing
+    'sympy', 'networkx', 'scipy.optimize', 'scipy.stats',
+    'scipy.integrate', 'scipy.linalg', 'scipy.sparse'
+}
 
 
 # ============================================================================
