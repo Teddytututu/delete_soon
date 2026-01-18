@@ -283,11 +283,26 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
     # 3. Initialize execution tracker (put in Memory layer)
     tracker = get_tracker(dirs["memory"], logger_manager)
 
-    # Initialize LLM with tracker and latent summary option
+    # 4. Initialize LLM with tracker and latent summary option
     llm = LLM(config['model_name'], key, logger_manager=logger_manager, tracker=tracker,
              enable_latent_summary=enable_latent_summary,
              latent_summary_stages=enable_latent_summary_stages,
              enable_summary_cache=enable_summary_cache)
+
+    # 5. Initialize Latent Reporter for post-processing research journal generation
+    # [NEW 2026-01-18] Pass tracker file for stage-level reflection
+    latent_reporter = None
+    try:
+        from utils.latent_reporter import create_latent_reporter
+        # Pass trace.jsonl path for post-processing analysis
+        trace_file = Path(dirs["memory"]) / "logs" / "trace.jsonl"
+        latent_reporter = create_latent_reporter(output_dir, llm, name)
+        # Update tracker_file attribute manually since create_latent_reporter doesn't accept it
+        latent_reporter.trace_file = trace_file
+        main_logger.info("[LATENT REPORTER] Initialized for research journal generation (post-processing mode)")
+    except Exception as e:
+        main_logger.warning(f"[LATENT REPORTER] Failed to initialize: {e}")
+        latent_reporter = None
 
     if enable_latent_summary:
         main_logger.info("[INFO] Latent LLM summaries ENABLED")
@@ -391,13 +406,30 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
             logger_manager.log_stage_start("Problem Analysis", stage_num=1)
             start_stage1 = time.time()
 
+            # [FIX] Log to LatentReporter
+            if latent_reporter:
+                latent_reporter.log_thought("Problem Analysis", "Starting problem analysis stage - loading problem file and decomposing into subtasks", "INFO")
+
             try:
                 problem, order, with_code, coordinator, task_descriptions, solution = \
-                    problem_analysis(llm, problem_path, config, dataset_path, dirs["workspace"], logger_manager)
+                    problem_analysis(llm, problem_path, config, dataset_path, dirs["workspace"], logger_manager, latent_reporter)
 
                 duration_stage1 = int(time.time() - start_stage1)
                 tracker.end_stage("Problem Analysis", duration_stage1)
                 logger_manager.log_stage_complete("Problem Analysis", duration_stage1, stage_num=1)
+
+                # [FIX] Log success to LatentReporter (real-time)
+                if latent_reporter:
+                    task_count = len(order) if order else 0
+                    latent_reporter.log_success("Problem Analysis", f"Successfully decomposed problem into {task_count} subtasks. DAG structure validated. Ready for mathematical modeling.")
+
+                # [NEW 2026-01-18] Post-processing stage reflection (reads trace.jsonl)
+                if latent_reporter and enable_latent_summary:
+                    try:
+                        latent_reporter.reflect_on_stage("problem_analysis")
+                        main_logger.info("[LATENT REPORTER] Stage 1 reflection (problem_analysis) completed")
+                    except Exception as e:
+                        main_logger.warning(f"[LATENT REPORTER] Failed to reflect on problem_analysis: {e}")
 
                 # STEP 4: Record stage completion for failure handling
                 if failure_handler:
@@ -408,7 +440,19 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
 
             except Exception as e:
                 tracker.track_error("stage_error", str(e), "Problem Analysis")
+                # [TRUTH MODE] Log complete traceback to trace.jsonl for forensic analysis
+                tracker.log_error("Problem Analysis", e)
                 logger_manager.log_exception(e, "Problem Analysis failed", stage="Problem Analysis")
+                # [FIX] Log error to LatentReporter (real-time)
+                if latent_reporter:
+                    latent_reporter.log_error_analysis(type(e).__name__, str(e))
+                # [NEW 2026-01-18] Post-processing error diagnosis (reads trace.jsonl)
+                if latent_reporter and enable_latent_summary:
+                    try:
+                        latent_reporter.diagnose_failure(f"{type(e).__name__}: {str(e)}")
+                        main_logger.info("[LATENT REPORTER] Error diagnosis completed")
+                    except Exception as e2:
+                        main_logger.warning(f"[LATENT REPORTER] Failed to diagnose failure: {e2}")
                 raise
         else:
             # SKIPPING STAGE 1
@@ -418,6 +462,11 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         tracker.start_stage("Mathematical Modeling & Computational Solving", stage_num=2)
         logger_manager.log_stage_start("Mathematical Modeling & Computational Solving", stage_num=2)
         start_stage23 = time.time()
+
+        # [FIX] Log to LatentReporter
+        if latent_reporter:
+            total_tasks = len(order) if order else 0
+            latent_reporter.log_thought("Mathematical Modeling & Computational Solving", f"Starting computational stage with {total_tasks} tasks. Will iterate through each subtask: retrieve methods, derive formulas, generate code, and execute.", "INFO")
 
         try:
             for task_id in order:
@@ -434,13 +483,13 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
 
                 # Mathematical Modeling
                 task_description, task_analysis, task_modeling_formulas, task_modeling_method, dependent_file_prompt = \
-                    mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager, dirs["workspace"])
+                    mathematical_modeling(task_id, problem, task_descriptions, llm, config, coordinator, with_code, logger_manager, dirs["workspace"], latent_reporter)
 
                 # Computational Solving
                 solution = computational_solving(
                     llm, coordinator, with_code, problem, task_id, task_description,
                     task_analysis, task_modeling_formulas, task_modeling_method,
-                    dependent_file_prompt, config, solution, name, output_dir, dataset_path, logger_manager
+                    dependent_file_prompt, config, solution, name, output_dir, dataset_path, logger_manager, latent_reporter
                 )
 
                 task_duration = int(time.time() - task_start_time)
@@ -455,13 +504,38 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
             tracker.end_stage("Mathematical Modeling & Computational Solving", duration_stage23)
             logger_manager.log_stage_complete("Mathematical Modeling & Computational Solving", duration_stage23, stage_num=2)
 
+            # [FIX] Log success to LatentReporter (real-time)
+            if latent_reporter:
+                completed_count = len(completed_tasks)
+                latent_reporter.log_success("Mathematical Modeling & Computational Solving", f"Completed {completed_count} tasks. All mathematical models derived, code generated and executed. Results ready for reporting.")
+
+            # [NEW 2026-01-18] Post-processing stage reflection (reads trace.jsonl)
+            if latent_reporter and enable_latent_summary:
+                try:
+                    latent_reporter.reflect_on_stage("mathematical_modeling")
+                    main_logger.info("[LATENT REPORTER] Stage 2/3 reflection (mathematical_modeling) completed")
+                except Exception as e:
+                    main_logger.warning(f"[LATENT REPORTER] Failed to reflect on mathematical_modeling: {e}")
+
             # STEP 4: Record stage completion for failure handling
             if failure_handler:
                 failure_handler.record_stage_completion("Mathematical Modeling & Computational Solving")
         except Exception as e:
             tracker.track_error("stage_error", str(e), "Mathematical Modeling & Computational Solving")
+            # [TRUTH MODE] Log complete traceback to trace.jsonl for forensic analysis
+            tracker.log_error("Mathematical Modeling & Computational Solving", e)
             logger_manager.log_exception(e, "Mathematical Modeling & Computational Solving failed",
                                         stage="Mathematical Modeling & Computational Solving")
+            # [FIX] Log error to LatentReporter (real-time)
+            if latent_reporter:
+                latent_reporter.log_error_analysis(type(e).__name__, f"Stage 2/3 failed: {str(e)}")
+            # [NEW 2026-01-18] Post-processing error diagnosis (reads trace.jsonl)
+            if latent_reporter and enable_latent_summary:
+                try:
+                    latent_reporter.diagnose_failure(f"{type(e).__name__}: {str(e)}")
+                    main_logger.info("[LATENT REPORTER] Error diagnosis completed")
+                except Exception as e2:
+                    main_logger.warning(f"[LATENT REPORTER] Failed to diagnose failure: {e2}")
             raise
 
         # ==================== STAGE 4: Solution Reporting (with PDF generation) ====================
@@ -470,6 +544,10 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         start_stage4 = time.time()
 
         try:
+            # [FIX] Log to LatentReporter
+            if latent_reporter:
+                latent_reporter.log_thought("Solution Reporting", "Starting solution report generation - compiling all task results into JSON, Markdown, LaTeX formats", "INFO")
+
             main_logger.info("[INFO] Stage 4: Generating solution paper (JSON, Markdown, LaTeX, PDF)...")
             # [FIX] Generate paper from Workspace/json where solution is saved
             paper = generate_paper(llm, dirs["workspace"], name)
@@ -477,6 +555,10 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
             duration_stage4 = int(time.time() - start_stage4)
             tracker.end_stage("Solution Reporting", duration_stage4)
             logger_manager.log_stage_complete("Solution Reporting", duration_stage4, stage_num=4)
+
+            # [FIX] Log success to LatentReporter
+            if latent_reporter:
+                latent_reporter.log_success("Solution Reporting", f"Generated comprehensive solution reports in JSON, Markdown, and LaTeX formats. All {len(completed_tasks)} tasks compiled into final paper.")
 
             # STEP 4: Record stage completion for failure handling
             if failure_handler:
@@ -490,6 +572,9 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
             logger_manager.log_exception(e, "Solution Reporting failed", stage="Solution Reporting")
             main_logger.warning(f"[WARNING] Stage 4 failed: {e}")
             main_logger.warning("[WARNING] Stages 1-3 completed successfully, but solution reporting failed")
+            # [FIX] Log error to LatentReporter
+            if latent_reporter:
+                latent_reporter.log_error_analysis(type(e).__name__, f"Solution reporting failed: {str(e)}")
             # Don't raise - graceful degradation, earlier stages succeeded
 
         # ==================== FINALIZE ====================
@@ -501,6 +586,10 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         main_logger.info(f"PIPELINE COMPLETE - Total duration: {total_duration}s")
         main_logger.info(f"{'='*80}\n")
 
+        # [FIX] Log pipeline success to LatentReporter
+        if latent_reporter:
+            latent_reporter.log_success("Pipeline Complete", f"Entire MM-Agent pipeline completed successfully in {total_duration}s. All {len(completed_tasks)} tasks processed, reports generated, and results saved.")
+
         # Print solution summary
         main_logger.info(f"Solution keys: {list(solution.keys())}")
         main_logger.info(f"Usage: {llm.get_total_usage()}")
@@ -510,16 +599,25 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         usage_dir.mkdir(parents=True, exist_ok=True)
         write_json_file(usage_dir / f'{name}.json', llm.get_total_usage())
 
+        # [NEW 2026-01-18] LATENT REPORTER: Post-processing result analysis
+        # Generate comprehensive result validation and sensitivity discussion
+        if latent_reporter is not None and enable_latent_summary:
+            try:
+                latent_reporter.summarize_results(solution)
+                main_logger.info("[LATENT REPORTER] Result analysis and validation completed")
+            except Exception as e:
+                # Non-fatal: result analysis failure should not crash the pipeline
+                main_logger.warning(f"[LATENT REPORTER] Failed to summarize results: {e}")
+
         # [NEW] LATENT REPORTER: Finalize research journal
         # Add concluding footer with total duration and completion status
-        try:
-            from utils.latent_reporter import create_latent_reporter
-            temp_reporter = create_latent_reporter(output_dir, llm, name)
-            temp_reporter.finalize_journal()
-            main_logger.info("[LATENT REPORTER] Research journal finalized with completion footer.")
-        except Exception as e:
-            # Non-fatal: journal finalization failure should not crash the pipeline
-            main_logger.warning(f"[LATENT REPORTER] Failed to finalize journal: {e}")
+        if latent_reporter is not None:
+            try:
+                latent_reporter.finalize_journal()
+                main_logger.info("[LATENT REPORTER] Research journal finalized with completion footer.")
+            except Exception as e:
+                # Non-fatal: journal finalization failure should not crash the pipeline
+                main_logger.warning(f"[LATENT REPORTER] Failed to finalize journal: {e}")
 
         return solution
 
@@ -786,10 +884,9 @@ def main():
         sys.exit(1)
 
     # P1 FIX: Check for duplicate runs
-    # TEMPORARILY DISABLED FOR TESTING
-    # if not check_existing_runs(args.task, max_runs=3, method_name=args.method_name):
-    #     import sys
-    #     sys.exit(0)  # User chose to abort
+    if not check_existing_runs(args.task, max_runs=3, method_name=args.method_name):
+        import sys
+        sys.exit(0)  # User chose to abort
 
     # Get experiment info and initialize logging system
     problem_path, config, dataset_dir, output_dir, logger_manager = get_info(args)
@@ -857,6 +954,29 @@ def main():
             failure_handler=failure_handler  # STEP 4: Pass to run() for stage tracking
         )
     except Exception as pipeline_error:
+        # [TRUTH MODE] CRITICAL FIX: Log complete traceback before anything else
+        # This ensures LatentReporter has the raw truth to analyze
+        try:
+            # Try to get tracker instance if it exists
+            # tracker is initialized in run(), but we need to handle the case where run() crashed before tracker init
+            from utils.execution_tracker import get_tracker
+            tracker = get_tracker(output_dir, logger_manager) if 'output_dir' in locals() else None
+
+            if tracker:
+                # CRITICAL: Call log_error() to record complete traceback to trace.jsonl
+                # This is the "Truth Mode" - record the raw Python traceback
+                tracker.log_error(
+                    stage="main_pipeline",
+                    error_obj=pipeline_error,
+                    context="Uncaught exception in main pipeline. Traceback recorded for forensic analysis."
+                )
+                main_logger = logger_manager.get_logger('main')
+                main_logger.critical("[TRUTH MODE] Complete traceback recorded to trace.jsonl via tracker.log_error()")
+        except Exception as tracker_error:
+            # If even this fails, at least log to stderr
+            print(f"[CRITICAL] Failed to log error to tracker: {tracker_error}")
+            print(f"[ORIGINAL ERROR] {type(pipeline_error).__name__}: {str(pipeline_error)}")
+
         # STEP 4: Pipeline crashed - write minimal solution.json
         error_msg = f"{type(pipeline_error).__name__}: {str(pipeline_error)}"
         main_logger = logger_manager.get_logger('main')
@@ -878,7 +998,16 @@ def main():
         main_logger.info(f"Minimal solution written: {failure_handler.solution_path}")
         main_logger.info("Downstream stages can now read partial results")
 
-        # Re-raise exception after writing minimal solution
+        # [TRUTH MODE] Call LatentReporter.diagnose_failure() AFTER tracker.log_error()
+        # Order matters: tracker must record first, then reporter analyzes
+        try:
+            if latent_reporter is not None:
+                latent_reporter.diagnose_failure(str(pipeline_error))
+                main_logger.info("[TRUTH MODE] LatentReporter forensic analysis completed")
+        except Exception as reporter_error:
+            main_logger.warning(f"[TRUTH MODE] LatentReporter diagnosis failed: {reporter_error}")
+
+        # Re-raise exception after writing minimal solution and recording error
         raise
 
     finally:
