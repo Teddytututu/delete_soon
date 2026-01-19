@@ -48,6 +48,7 @@ except ImportError:
 
 import time
 import argparse
+import atexit
 from functools import partial
 
 
@@ -651,7 +652,7 @@ def run(key, problem_path, config, name, dataset_path, output_dir, logger_manage
         logger_manager.shutdown()
 
 
-def check_existing_runs(task_id: str, max_runs: int = 3, method_name: str = 'MM-Agent'):
+def check_existing_runs(task_id: str, max_runs: int = 3, method_name: str = 'MM-Agent', force: bool = False):
     """
     Check if there are too many existing runs for the same task.
 
@@ -686,6 +687,10 @@ def check_existing_runs(task_id: str, max_runs: int = 3, method_name: str = 'MM-
 
         for i, run in enumerate(runs_sorted[:5], 1):
             print(f"  {i}. {run.name}")
+
+        if force:
+            print("[--yes] Skipping confirmation prompt, continuing...")
+            return True
 
         response = input("Continue anyway? (y/N): ").strip()
         if response.lower() != 'y':
@@ -833,6 +838,8 @@ def parse_arguments():
                              'If not specified, summaries are generated for all stages.')
     parser.add_argument('--disable_summary_cache', action='store_true',
                         help='Disable summary caching (default: enabled). Caching reduces cost by reusing summaries for similar prompts.')
+    parser.add_argument('--yes', action='store_true',
+                        help='Skip all confirmation prompts (useful for automated runs)')
 
     args = parser.parse_args()
 
@@ -884,7 +891,7 @@ def main():
         sys.exit(1)
 
     # P1 FIX: Check for duplicate runs
-    if not check_existing_runs(args.task, max_runs=3, method_name=args.method_name):
+    if not check_existing_runs(args.task, max_runs=3, method_name=args.method_name, force=args.yes):
         import sys
         sys.exit(0)  # User chose to abort
 
@@ -938,6 +945,37 @@ def main():
     except ImportError:
         from utils.failure_handler import FailureHandler
     failure_handler = FailureHandler(output_dir, args.task)
+
+    # ==============================================================================
+    # [DOOMSDAY SURVIVAL] Dead Man's Switch - 100% PDF Generation Guarantee
+    # ==============================================================================
+    # Philosophy: "只要结束就会启动，且不生成不罢休"
+    # (Whenever the process ends, survival kit activates, won't stop until PDF is out)
+    #
+    # Dual-trigger mechanism:
+    # 1. atexit.register() - Catches normal exits and sys.exit()
+    # 2. finally block - Catches exceptions and crashes
+    # ==============================================================================
+
+    # Import SurvivalKit
+    try:
+        from .utils.solution_reporting import activate_survival_kit
+    except ImportError:
+        from utils.solution_reporting import activate_survival_kit
+
+    # Flag to track if SurvivalKit has already run
+    survival_kit_triggered = [False]  # Use list to allow modification in nested function
+
+    # atexit handler (Double insurance)
+    def exit_handler():
+        """Exit handler registered with atexit - runs on normal termination."""
+        if not survival_kit_triggered[0]:
+            print("\n🛑 [EXIT HANDLER] Process terminating normally. Checking PDF generation...")
+            survival_kit_triggered[0] = True
+            activate_survival_kit(output_dir)
+
+    # Register exit handler
+    atexit.register(exit_handler)
 
     try:
         solution = run(
@@ -1029,6 +1067,35 @@ def main():
                 main_logger.info("Minimal solution.json has been written to prevent cascading failures")
         except Exception as e:
             print(f"\n[ERROR] Failed to save runtime.txt: {e}")  # Keep as print since logger might not be initialized
+
+        # ==============================================================================
+        # [DOOMSDAY SURVIVAL] Finally Block Trigger - Absolute Last Resort
+        # ==============================================================================
+        # This is the IRON CLAD guarantee. No matter what happens:
+        # - Success? Generate survival PDF as backup
+        # - Crash? Generate survival PDF from partial data
+        # - Ctrl+C? Generate survival PDF before exiting
+        # ==============================================================================
+
+        if not survival_kit_triggered[0]:
+            print("\n" + "="*60)
+            print("🛡️ ACTIVATING SURVIVAL PROTOCOL (finally block)")
+            print("="*60)
+            print("📂 Output Directory:", output_dir)
+            survival_kit_triggered[0] = True
+
+            try:
+                survival_success = activate_survival_kit(output_dir)
+                if survival_success:
+                    print("🎉 SURVIVAL KIT: PDF delivered successfully!")
+                else:
+                    print("❌ SURVIVAL KIT: Failed to generate PDF (check logs above)")
+            except Exception as survival_error:
+                print(f"❌ SURVIVAL KIT CRASHED: {survival_error}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("\n✅ [SURVIVAL] PDF already generated via exit handler")
 
 
 # [FIX 11.5] Standard entry point - allows both script execution and module import

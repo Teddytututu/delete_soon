@@ -40,6 +40,7 @@ statsmodels>=0.13.0
 # Visualization and reporting
 matplotlib>=3.8.0,<4.0.0
 seaborn>=0.12.0
+squarify>=0.4.3
 pylatex>=1.4.0
 
 # NLP and embeddings

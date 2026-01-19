@@ -9,6 +9,7 @@ import json
 import subprocess
 import os
 import re
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from string import Template  # Required for template substitution
@@ -1573,4 +1574,824 @@ def generate_paper(llm, output_dir, name):
 
     # [FIX] Generate paper in Workspace/latex (using the correctly resolved path)
     generate_paper_from_json(llm, json_data, metadata, str(latex_dir), 'solution')
+
+
+# ============================================================================
+# SURVIVAL KIT: Dead Man's Switch for PDF Generation
+# ============================================================================
+#
+# This implements the "Doomsday-Survival" report generation system.
+# It ensures PDF generation happens even if the main pipeline crashes.
+#
+# Key Features:
+# 1. Context hunting: Searches for 2025_C.md or Journal.md
+# 2. Context fusion: Merges available content with generated charts
+# 3. Brute-force compilation: Auto-heals LaTeX errors and retries
+# 4. Dead Man's Switch: Triggered by atexit and finally blocks in main.py
+# ============================================================================
+
+import atexit
+import shutil
+from collections import defaultdict
+
+# ============================================================================
+# ASSET INDEXER: Omni-Aware Scanning System
+# ============================================================================
+#
+# This component scans the workspace for ALL assets (images, code, JSON)
+# and builds a Task ID -> [Images, Code, JSON] index map.
+#
+# Purpose: "只要 Workspace 里有图、有代码、有 JSON，就要主动抓取"
+# ============================================================================
+
+class AssetIndexer:
+    """
+    [核心感知层] 全域资产索引器
+
+    负责扫描磁盘上的所有碎片，并按 Task ID 进行归类。
+
+    Features:
+    - Scans charts/ directory for images
+    - Scans code/ directory for Python files
+    - Scans json/ directory for result files
+    - Builds Task ID -> [Images, Code, JSON] mapping
+    """
+
+    def __init__(self, workspace_dir):
+        """
+        Initialize AssetIndexer with workspace directory.
+
+        Args:
+            workspace_dir: Path to Workspace directory
+        """
+        self.workspace = Path(workspace_dir)
+        # Structure: {task_id: {"images": [], "code": [], "json": None}}
+        self.assets = defaultdict(lambda: {"images": [], "code": [], "json": None})
+        self.global_code = []  # All code files regardless of task
+
+    def scan(self):
+        """
+        执行全盘扫描，建立资产索引
+
+        Returns:
+            tuple: (task_assets dict, global_code list)
+        """
+        print(f"   🔍 Scanning workspace: {self.workspace}")
+
+        # 1. Scan images (charts/)
+        self._scan_images()
+
+        # 2. Scan code files (code/)
+        self._scan_code()
+
+        # 3. Scan JSON results (json/)
+        self._scan_json()
+
+        # Summary
+        total_images = sum(len(v["images"]) for v in self.assets.values())
+        total_code = len(self.global_code)
+        total_tasks = len(self.assets)
+
+        print(f"   📊 Scan Results:")
+        print(f"      - {total_tasks} tasks with assets")
+        print(f"      - {total_images} images found")
+        print(f"      - {total_code} code files found")
+
+        return dict(self.assets), self.global_code
+
+    def _scan_images(self):
+        """Scan charts/ directory for image files"""
+        charts_dir = self.workspace / "charts"
+        if not charts_dir.exists():
+            return
+
+        for img in charts_dir.glob("*.[pP][nN][gG]"):
+            tid = self._extract_task_id(img.name)
+            if tid:
+                self.assets[tid]["images"].append(str(img))
+                print(f"      📷 Found image for Task {tid}: {img.name}")
+
+        # Also check JPG/JPEG
+        for img in charts_dir.glob("*.[jJ][pP][gG]"):
+            tid = self._extract_task_id(img.name)
+            if tid:
+                self.assets[tid]["images"].append(str(img))
+                print(f"      📷 Found image for Task {tid}: {img.name}")
+
+    def _scan_code(self):
+        """Scan code/ directory for Python files"""
+        code_dir = self.workspace / "code"
+        if not code_dir.exists():
+            return
+
+        for py in code_dir.glob("*.py"):
+            tid = self._extract_task_id(py.name)
+            if tid:
+                self.assets[tid]["code"].append(str(py))
+
+            # Always add to global code list
+            self.global_code.append(str(py))
+            print(f"      🐍 Found code: {py.name}")
+
+    def _scan_json(self):
+        """Scan json/ directory for result files"""
+        json_dir = self.workspace / "json"
+        if not json_dir.exists():
+            return
+
+        for js in json_dir.glob("*.json"):
+            tid = self._extract_task_id(js.name)
+            if tid:
+                self.assets[tid]["json"] = str(js)
+                print(f"      📄 Found JSON for Task {tid}: {js.name}")
+
+    def _extract_task_id(self, filename):
+        """
+        从文件名中提取数字 ID
+
+        Examples:
+            chart_1.png -> 1
+            task_2_chart.png -> 2
+            main3.py -> 3
+            2025_C.json -> None (no task ID)
+        """
+        # Match first sequence of digits in filename
+        match = re.search(r'(\d+)', filename)
+        if match:
+            return int(match.group(1))
+        return None
+
+
+class SurvivalKit:
+    """
+    Emergency PDF generation system that activates on pipeline failure.
+
+    Philosophy: "只要结束就会启动，且不生成不罢休"
+    (Whenever the process ends, it activates, and won't stop until PDF is generated)
+
+    Usage:
+        kit = SurvivalKit(output_dir)
+        success = kit.activate_survival_mode()
+    """
+
+    def __init__(self, output_dir):
+        """
+        Initialize SurvivalKit with output directory.
+
+        Args:
+            output_dir: Path to output directory (Path object or string)
+        """
+        self.output_dir = Path(output_dir)
+        self.workspace = self.output_dir / "Workspace"
+        self.charts_dir = self.workspace / "charts"
+        self.latex_dir = self.workspace / "latex"
+        self.latex_dir.mkdir(parents=True, exist_ok=True)
+
+        # [OMNI-AWARE] Initialize AssetIndexer for full-context recovery
+        self.indexer = AssetIndexer(self.workspace)
+
+    def activate_survival_mode(self):
+        """
+        [OMNI-SURVIVAL] Main entry point with full-context recovery.
+
+        Strategy:
+        1. Scan ALL assets (images, code, JSON) - AssetIndexer
+        2. Load best markdown (2025_C.md > Journal.md)
+        3. Reconstruct LaTeX with intelligent injection
+        4. Auto-append all code files
+        5. Brute-force compile with auto-healing
+
+        Returns:
+            bool: True if PDF generated successfully, False otherwise
+        """
+        print("\n" + "="*60)
+        print("[OMNI-SURVIVAL] ACTIVATED (Full-Context Recovery)")
+        print("="*60)
+        print(f"Output Directory: {self.output_dir}")
+
+        # Step 1: Asset Indexing (Omni-Aware)
+        print("\n[OMNI-AWARE] Scanning for ALL assets...")
+        task_assets, all_codes = self.indexer.scan()
+
+        # Step 2: Load Markdown Skeleton
+        print("\n[RECONSTRUCTION] Loading markdown skeleton...")
+        md_content, title = self._load_best_markdown()
+
+        if not md_content:
+            print("[ERROR] No Markdown context found. Generating emergency report...")
+            return self._generate_emergency_one_pager("NO DATA FOUND")
+
+        print(f"[OK] Loaded: {title} ({len(md_content)} chars)")
+
+        # Step 3: Intelligent Reconstruction with Asset Injection
+        print("\n[RECONSTRUCTION] Building LaTeX with intelligent injection...")
+        final_latex = self._reconstruct_latex(md_content, task_assets, all_codes)
+
+        # Step 4: Brute-Force Compilation
+        print("\n[COMPILATION] Starting brute-force LaTeX compilation...")
+        return self._compile_until_success(final_latex, f"{title}_OmniSurvival.pdf")
+
+
+    def _load_best_markdown(self):
+        """
+        [OMNI-AWARE] Load the best available markdown file.
+
+        Priority:
+        1. 2025_*.md (Draft paper - structured)
+        2. *Journal.md (Research log - detailed)
+        3. Report/*.md (fallback)
+
+        Returns:
+            tuple: (content, title) or ("", "Emergency") if nothing found
+        """
+        # Search for draft paper (e.g., 2025_C.md)
+        draft_files = list(self.workspace.glob("2025_*.md"))
+
+        if draft_files:
+            draft_file = draft_files[0]  # Use first match
+            print(f"   [MD] Found Draft Paper: {draft_file.name}")
+            try:
+                with open(draft_file, 'r', encoding='utf-8') as f:
+                    return f.read(), draft_file.stem
+            except Exception as e:
+                print(f"   [ERROR] Failed to read draft: {e}")
+
+        # Fallback: Search for Journal
+        journal_files = list(self.output_dir.glob("*Journal.md"))
+
+        if journal_files:
+            journal_file = journal_files[0]
+            print(f"   [MD] Using Journal as fallback: {journal_file.name}")
+            try:
+                with open(journal_file, 'r', encoding='utf-8') as f:
+                    return f.read(), journal_file.stem
+            except Exception as e:
+                print(f"   [ERROR] Failed to read journal: {e}")
+
+        # Also check Workspace/Report subdirectory
+        report_files = list(self.workspace.glob("Report/*.md"))
+        if report_files:
+            try:
+                with open(report_files[0], 'r', encoding='utf-8') as f:
+                    return f.read(), f"Report/{report_files[0].stem}"
+            except Exception as e:
+                print(f"   [ERROR] Failed to read report: {e}")
+
+        print("   [ERROR] No Markdown files found")
+        return "", "Emergency"
+
+    def _reconstruct_latex(self, md_text, task_assets, all_codes):
+        """
+        [OMNI-AWARE] Intelligent reconstruction with asset injection.
+
+        This is the CORE logic that merges markdown text with discovered assets.
+        It automatically injects images and code even if markdown doesn't mention them.
+
+        Args:
+            md_text: Markdown content
+            task_assets: Dict of {task_id: {"images": [], "code": [], "json": path}}
+            all_codes: List of all code file paths
+
+        Returns:
+            str: Complete LaTeX document
+        """
+        lines = md_text.split('\n')
+        body = []
+
+        current_task_id = None
+        in_code_block = False
+        inserted_images = set()
+
+        for line in lines:
+            line = line.rstrip()
+
+            # --- 1. Task Anchor Detection ---
+            # Detect patterns like "## Task 1", "##### Chart 1", "### Step 2"
+            task_match = re.search(r'(?:Task|Step|Chart)\s*(\d+)', line, re.IGNORECASE)
+            header_match = re.match(r'^#+\s', line)
+
+            if task_match and header_match:
+                # This is a new task section!
+                new_task_id = int(task_match.group(1))
+                current_task_id = new_task_id
+                print(f"      [INJECT] Task {current_task_id} section detected")
+
+            # --- 2. Code Block Handling ---
+            if line.startswith("```"):
+                if in_code_block:
+                    body.append(r"\end{lstlisting}")
+                    in_code_block = False
+                else:
+                    body.append(r"\begin{lstlisting}[breaklines=true, basicstyle=\ttfamily\scriptsize]")
+                    in_code_block = True
+                continue
+
+            if in_code_block:
+                body.append(line)
+                continue
+
+            # --- 3. Text Content Translation ---
+            latex_line = self._process_text_line(line)
+            body.append(latex_line)
+
+            # --- 4. Active Injection (Crucial!) ---
+            # When we hit an empty line at the end of a task section, inject orphaned assets
+            if not line.strip() and current_task_id and current_task_id in task_assets:
+                assets = task_assets[current_task_id]
+
+                # A. Inject orphaned images
+                for img_path in assets['images']:
+                    if img_path not in inserted_images:
+                        # Convert to LaTeX-friendly path
+                        rel_path = os.path.relpath(img_path, str(self.latex_dir)).replace(os.sep, '/')
+                        body.append(f"\\begin{{figure}}[H]\\centering\\includegraphics[width=0.8\\textwidth]{{{rel_path}}}\\caption{{Task {current_task_id} Visualization (Auto-injected)}}\\end{{figure}}")
+                        inserted_images.add(img_path)
+                        print(f"      [INJECT] Auto-injected orphaned image for Task {current_task_id}")
+
+        # --- 5. Appendix: All Code Files ---
+        # Regardless of what markdown says, append ALL code files at the end
+        if all_codes:
+            print(f"      [APPENDIX] Adding {len(all_codes)} code files to appendix")
+            body.append(r"\clearpage")
+            body.append(r"\section{Appendix: Full Source Code}")
+            all_codes_sorted = sorted(all_codes)
+
+            for code_path in all_codes_sorted:
+                fname = os.path.basename(code_path)
+                try:
+                    with open(code_path, 'r', encoding='utf-8') as f:
+                        code_content = f.read()
+
+                    # Escape LaTeX special chars in code
+                    code_content = code_content.replace('\\', '\textbackslash{}')
+
+
+                    code_content = code_content.replace('{', '\{')
+
+
+                    code_content = code_content.replace('}', '\}')
+
+
+
+                    body.append(f"\subsection*{{{self._escape_latex(fname)}}}")
+
+                    body.append("\begin{lstlisting}[language=Python, breaklines=true, basicstyle=\ttfamily\tiny]")
+                    body.append(code_content)
+                    body.append("\end{lstlisting}")
+                except Exception as e:
+                    body.append(f"\textbf{{Error reading {self._escape_latex(fname)}}}: {e}")
+
+        # --- 6. Wrap in LaTeX template ---
+        return self._wrap_latex_template(body)
+
+    def _process_text_line(self, line):
+        """Process a single line of markdown to LaTeX"""
+        if line.strip() == "":
+            return ""
+
+        # Header processing
+        if line.startswith("#"):
+            level = line.count("#")
+            text = line.replace("#", "").strip()
+            text = self._escape_latex(text)
+            cmd = "section" if level == 1 else "subsection" if level == 2 else "subsubsection"
+            return f"\{cmd}{{{text}}}"
+
+        # Image links - ignore (we handle via injection)
+        if "![" in line:
+            return "% Image link detected in MD, handled by asset injector."
+
+        # Regular text - escape and add line break
+        escaped = self._escape_latex(line)
+        if escaped:
+            return escaped + r" \\"
+
+        return ""
+
+    def _wrap_latex_template(self, body_lines):
+        """Wrap body content in complete LaTeX document template"""
+        return r"""
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{float}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{Automated Research Report (Omni-Survival Mode)}
+\author{LLM-MM-Agent Survival Kit}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+""" + "\n".join(body_lines) + r"""
+
+\end{document}
+"""
+
+    def _hunt_for_context(self):
+        """
+        Search for the best available context source.
+
+        Priority:
+        1. 2025_*.md (Draft paper - structured)
+        2. *Journal.md (Research log - detailed)
+
+        Returns:
+            tuple: (content, source_name) or ("", "") if nothing found
+        """
+        # Search for draft paper (e.g., 2025_C.md)
+        draft_files = list(self.workspace.glob("2025_*.md"))
+
+        if draft_files:
+            draft_file = draft_files[0]  # Use first match
+            print(f"✅ Found Draft Paper: {draft_file.name}")
+            try:
+                with open(draft_file, 'r', encoding='utf-8') as f:
+                    return f.read(), "Draft Paper"
+            except Exception as e:
+                print(f"⚠️ Failed to read draft: {e}")
+
+        # Fallback: Search for Journal
+        journal_files = list(self.output_dir.glob("*Journal.md"))
+
+        if journal_files:
+            journal_file = journal_files[0]
+            print(f"⚠️ Using Journal as fallback: {journal_file.name}")
+            try:
+                with open(journal_file, 'r', encoding='utf-8') as f:
+                    return f.read(), "Research Log"
+            except Exception as e:
+                print(f"⚠️ Failed to read journal: {e}")
+
+        # Also check Workspace/Report subdirectory
+        report_files = list(self.workspace.glob("Report/*.md"))
+        if report_files:
+            try:
+                with open(report_files[0], 'r', encoding='utf-8') as f:
+                    return f.read(), f"Report/{report_files[0].name}"
+            except Exception as e:
+                print(f"⚠️ Failed to read report: {e}")
+
+        print("❌ No Markdown files found")
+        return "", ""
+
+    def _transpile_md_to_latex(self, md_text, title_suffix):
+        """
+        Context-aware Markdown to LaTeX transpiler.
+
+        Features:
+        - Escapes all special characters
+        - Preserves code blocks
+        - Detects chart references and inserts images (or placeholders)
+        - Generates complete LaTeX document
+
+        Args:
+            md_text: Markdown content
+            title_suffix: Title for the document
+
+        Returns:
+            str: Complete LaTeX document
+        """
+        lines = md_text.split('\n')
+        body = []
+        in_code = False
+
+        for line in lines:
+            line = line.rstrip()
+
+            # Code Block Context
+            if line.startswith("```"):
+                if in_code:
+                    body.append("\\end{lstlisting}")
+                    in_code = False
+                else:
+                    body.append("\\begin{lstlisting}[breaklines=true, basicstyle=\\ttfamily\\scriptsize]")
+                    in_code = True
+                continue
+
+            if in_code:
+                body.append(line)
+                continue
+
+            # Image Context (CRITICAL!)
+            # Detect patterns like "##### Chart 1" or "![Chart](...)"
+            chart_match = re.search(r'(?:Chart|Task|Figure)\s*(\d+)', line, re.IGNORECASE)
+            is_header = line.startswith("#")
+
+            if (chart_match and is_header) or "![" in line:
+                num = chart_match.group(1) if chart_match else "Unknown"
+
+                # Try to find image on disk
+                img_path = self._find_image_on_disk(num)
+
+                if img_path:
+                    print(f"  🖼️ Found image for Chart {num}: {img_path}")
+                    # Use relative path for LaTeX compilation
+                    rel_path = os.path.relpath(img_path, str(self.latex_dir)).replace(os.sep, '/')
+                    body.append(f"\\begin{{figure}}[H]\\centering\\includegraphics[width=0.8\\textwidth]{{{rel_path}}}\\caption{{Chart {num}}}\\end{{figure}}")
+                else:
+                    print(f"  ⚠️ Missing Chart {num} - using placeholder")
+                    # Generate red placeholder box using TikZ
+                    body.append(f"\\begin{{figure}}[H]\\centering\\begin{{tikzpicture}}\\draw[red,thick] (0,0) rectangle (8,4);\\node[red] at (4,2) {{MISSING CHART {num}}};\\end{{tikzpicture}}\\caption{{Chart {num} (Not Found)}}\\end{{figure}}")
+                continue
+
+            # Text Context
+            if line.strip() == "":
+                body.append("")  # Preserve paragraph breaks
+            elif line.startswith("#"):
+                # Header processing
+                level = line.count("#")
+                text = line.replace("#", "").strip()
+                cmd = "section" if level == 1 else "subsection" if level == 2 else "subsubsection"
+                body.append(f"\\{cmd}{{{self._escape_latex(text)}}}")
+            else:
+                # Regular text - escape and add line break
+                escaped = self._escape_latex(line)
+                if escaped:  # Only add non-empty lines
+                    body.append(escaped + " \\\\")
+
+        # Assemble complete LaTeX document
+        return f"""
+\\documentclass{{article}}
+\\usepackage{{graphicx}}
+\\usepackage{{listings}}
+\\usepackage{{xcolor}}
+\\usepackage{{tikz}}
+\\usepackage{{float}}
+\\usepackage[utf8]{{inputenc}}
+\\usepackage{{hyperref}}
+\\usepackage{{amsmath}}
+\\title{{Survival Report: {title_suffix}}}
+\\author{{LLM-MM-Agent Survival Kit}}
+\\date{{\\today}}
+\\begin{{document}}
+\\maketitle
+\\tableofcontents
+\\newpage
+{chr(10).join(body)}
+\\end{{document}}
+"""
+
+    def _find_image_on_disk(self, num):
+        """
+        Fuzzy search for chart images on disk.
+
+        Args:
+            num: Chart number (as string)
+
+        Returns:
+            str: Absolute path to image, or None if not found
+        """
+        if not self.charts_dir.exists():
+            return None
+
+        # Search patterns for chart images
+        patterns = [
+            f"chart_{num}.png",
+            f"chart_{num}.jpg",
+            f"task_{num}_chart*.png",
+            f"task_{num}_chart*.jpg",
+            f"*{num}*.png",
+            f"*{num}*.jpg",
+        ]
+
+        for pattern in patterns:
+            found = list(self.charts_dir.glob(pattern))
+            if found:
+                return str(found[0])  # Return first match
+
+        return None
+
+    def _escape_latex(self, text):
+        """
+        Full-spectrum LaTeX special character escaping.
+
+        Args:
+            text: Plain text string
+
+        Returns:
+            str: LaTeX-safe string
+        """
+        if not isinstance(text, str):
+            return str(text)
+
+        latex_escapes = {
+            '&': r'\&',
+            '%': r'\%',
+            '$': r'\$',
+            '#': r'\#',
+            '_': r'\_',
+            '{': r'\{',
+            '}': r'\}',
+            '~': r'\textasciitilde{}',
+            '^': r'\textasciicircum{}',
+            '\\': r'\textbackslash{}',
+        }
+
+        return "".join([latex_escapes.get(c, c) for c in text])
+
+    def _compile_until_success(self, tex_content, pdf_name):
+        """
+        Brute-force LaTeX compiler with auto-healing.
+
+        Strategy:
+        1. Try to compile
+        2. If fails, analyze log for errors
+        3. Apply surgery to fix errors
+        4. Retry (up to max_retries times)
+
+        Args:
+            tex_content: Complete LaTeX document
+            pdf_name: Output PDF filename
+
+        Returns:
+            bool: True if PDF generated successfully
+        """
+        tex_path = self.latex_dir / "survival.tex"
+
+        # Write initial file
+        with open(tex_path, 'w', encoding='utf-8') as f:
+            f.write(tex_content)
+
+        max_retries = 10
+
+        for attempt in range(max_retries):
+            print(f"🔄 Compilation Attempt {attempt + 1}/{max_retries}")
+
+            # Run pdflatex with nonstopmode (don't hang on errors)
+            cmd = ['pdflatex', '-interaction=nonstopmode', 'survival.tex']
+            result = subprocess.run(
+                cmd,
+                cwd=str(self.latex_dir),
+                capture_output=True,
+                timeout=60  # 60 second timeout
+            )
+
+            # Check if PDF was generated
+            target_pdf = self.latex_dir / "survival.pdf"
+            if target_pdf.exists():
+                # Success! Move to output directory
+                final_path = self.output_dir / pdf_name
+                try:
+                    shutil.copy(str(target_pdf), str(final_path))
+                    print(f"🎉 SUCCESS! PDF saved to: {final_path}")
+                    return True
+                except Exception as e:
+                    print(f"⚠️ PDF generated but failed to copy: {e}")
+                    return True  # Still counts as success
+
+            # --- Auto-Healing Logic ---
+            print("⚠️ Compilation failed. Analyzing log for surgery...")
+
+            log_file = self.latex_dir / "survival.log"
+            if not log_file.exists():
+                print("❌ No log file found. Cannot heal.")
+                break
+
+            try:
+                with open(log_file, 'r', encoding='latin1') as f:
+                    log_content = f.read()
+            except Exception as e:
+                print(f"❌ Failed to read log: {e}")
+                break
+
+            # Strategy A: Delete error lines
+            # Pattern: "l.123" indicates line 123
+            error_lines = re.findall(r'^l\.(\d+)', log_content, re.MULTILINE)
+            if error_lines:
+                # Deduplicate and sort in reverse (to delete from bottom up)
+                lines_to_delete = sorted(list(set(int(l) for l in error_lines)), reverse=True)
+                print(f"✂️ Deleting error lines: {lines_to_delete[:5]}...")  # Show first 5
+
+                try:
+                    with open(tex_path, 'r', encoding='utf-8') as f:
+                        source_lines = f.readlines()
+
+                    for line_idx in lines_to_delete:
+                        if 0 <= line_idx - 1 < len(source_lines):
+                            # Comment out the problematic line
+                            source_lines[line_idx - 1] = "% [KILLED BY SURVIVAL KIT] " + source_lines[line_idx - 1]
+
+                    # Write back
+                    with open(tex_path, 'w', encoding='utf-8') as f:
+                        f.writelines(source_lines)
+
+                    print("  → Error lines commented out")
+                    continue  # Retry
+                except Exception as e:
+                    print(f"❌ Failed to delete lines: {e}")
+
+            # Strategy B: Missing images
+            if "File `" in log_content and "not found" in log_content:
+                print("🖼️ Missing image files detected. Removing all includes...")
+                try:
+                    with open(tex_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+
+                    # Replace all includegraphics with red boxes
+                    content = re.sub(
+                        r'\\includegraphics.*?\{.*?\}',
+                        r'\\fbox{\\textcolor{red}{IMAGE DELETED}}',
+                        content
+                    )
+
+                    with open(tex_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+
+                    print("  → Image includes removed")
+                    continue  # Retry
+                except Exception as e:
+                    print(f"❌ Failed to remove images: {e}")
+
+            # Strategy C: Missing packages
+            if "Undefined control sequence" in log_content:
+                undefined_seq = re.search(r'Undefined control sequence \\\\([a-zA-Z]+)', log_content)
+                if undefined_seq:
+                    seq = undefined_seq.group(1)
+                    print(f"📦 Undefined control sequence: \\{seq}")
+
+                    # Check if it's a TikZ command
+                    if seq in ['draw', 'node', 'coordinate']:
+                        if "\\usepackage{tikz}" not in tex_content:
+                            try:
+                                with open(tex_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+
+                                content = content.replace(
+                                    "\\usepackage{graphicx}",
+                                    "\\usepackage{graphicx}\n\\usepackage{tikz}"
+                                )
+
+                                with open(tex_path, 'w', encoding='utf-8') as f:
+                                    f.write(content)
+
+                                print("  → Added tikz package")
+                                continue  # Retry
+                            except Exception as e:
+                                print(f"❌ Failed to add package: {e}")
+
+            # If we get here, no healing strategy worked
+            print("❌ Unknown error pattern. Cannot heal.")
+            print(f"First 500 chars of log:\n{log_content[:500]}")
+            break
+
+        print(f"❌ Failed after {max_retries} attempts")
+        return False
+
+    def _generate_emergency_one_pager(self, message):
+        """
+        Generate minimal emergency PDF when no context is available.
+
+        Args:
+            message: Error message to display
+
+        Returns:
+            bool: True if PDF generated
+        """
+        emergency_latex = f"""
+\\documentclass{{article}}
+\\usepackage{{tikz}}
+\\begin{{document}}
+\\begin{{tikzpicture}}
+\\draw[red,thick] (0,0) rectangle (16,10);
+\\node[red,align=center] at (8,5) {{
+\\Huge SURVIVAL MODE EMERGENCY REPORT\\\\
+\\large Generated at: \\today\\\\
+\\large {message}
+}};
+\\end{{tikzpicture}}
+\\end{{document}}
+"""
+        return self._compile_until_success(emergency_latex, "Emergency_Report.pdf")
+
+
+def activate_survival_kit(output_dir):
+    """
+    Convenience function to activate SurvivalKit.
+
+    This is designed to be called from atexit or finally blocks.
+
+    Args:
+        output_dir: Output directory path (Path or string)
+
+    Returns:
+        bool: True if PDF generated successfully
+    """
+    try:
+        kit = SurvivalKit(output_dir)
+        return kit.activate_survival_mode()
+    except Exception as e:
+        print(f"❌ SURVIVAL KIT CRASHED: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 

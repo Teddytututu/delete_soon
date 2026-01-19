@@ -807,6 +807,16 @@ class ChartCreator(BaseAgent):
                 elif not y_cols:
                     y_cols = [y_val] if y_val else []
 
+            # Filter out duplicate keys from params to avoid "got multiple values for keyword argument" error
+            # Also filter out 'y_column' (singular) as we use 'y_columns' (plural)
+            filtered_params = {k: v for k, v in params.items()
+                               if k not in {'x_column', 'y_column', 'y_columns', 'title', 'output_path', 'chart_type', 'csv_filename'}}
+
+            # Debug logging to track parameter passing
+            logger.debug(f"[Template] Original params keys: {list(params.keys())}")
+            logger.debug(f"[Template] Filtered params keys: {list(filtered_params.keys())}")
+            logger.debug(f"[Template] Calling with x_column={x_col}, y_columns={y_cols}")
+
             # Call the new rendering function
             code = render_chart_code(
                 chart_type=template_id,
@@ -815,7 +825,7 @@ class ChartCreator(BaseAgent):
                 y_columns=y_cols,
                 title=params.get('title', 'Chart'),
                 output_path=save_path.replace('\\', '/'),
-                **params  # Pass kind, bins, etc.
+                **filtered_params  # Pass kind, bins, etc.
             )
 
             logger.info(f"[Template] Code rendered successfully ({len(code)} chars)")

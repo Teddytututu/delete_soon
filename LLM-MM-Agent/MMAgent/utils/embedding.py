@@ -13,13 +13,20 @@ class EmbeddingScorer:
     def __init__(self, model_name='Alibaba-NLP/gte-multilingual-base'):
         """
         Initialize the EmbeddingScorer with the specified model.
-        
+
         Args:
             model_name (str): Name of the model to use.
         """
-        # Load the tokenizer and model
+        # Load the tokenizer and model with memory optimization
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        # Load model with optimizations to reduce memory usage
+        self.model = AutoModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            # Memory optimizations
+            torch_dtype=torch.float16,  # Use half precision to reduce memory
+            low_cpu_mem_usage=True,        # Enable CPU memory optimization
+        )
         self.dimension = 768  # The output dimension of the embedding
     
     def score_method(self, query: str, methods: List[dict]) -> List[dict]:

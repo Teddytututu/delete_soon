@@ -275,6 +275,47 @@ def computational_solving(llm, coordinator, with_code, problem, task_id, task_de
                 stats = schema_registry.get_statistics()
                 main_logger.info(f"[P1-5] Generated schema info for {stats['total_files']} files ({stats['input_files']} input + {stats['task_files']} task-generated)")
                 main_logger.info(f"[P1-5] Total columns available: {stats['total_columns']}")
+
+            # [CRITICAL UPGRADE] Inject rich data snapshots with actual samples
+            # This gives LLM REAL data with column types, sample values, and statistics
+            # instead of just schema. Prevents KeyError from hallucinated columns/names.
+            try:
+                data_manager = get_data_manager()
+                if data_manager:
+                    # Configure DataManager with dataset_dir for proper file resolution
+                    if dataset_dir and os.path.exists(dataset_dir):
+                        data_manager.set_work_dir(work_dir)  # For task-generated outputs
+
+                    snapshot_section = "\n\n## 📊 ACTUAL DATA SNAPSHOTS - READ CAREFULLY:\n"
+                    snapshot_section += "The following tables show REAL data from your CSV files.\n"
+                    snapshot_section += "Use these EXACT column names and data types - DO NOT HALLUCINATE!\n\n"
+
+                    # Get snapshots for input files first
+                    if stats['input_files'] > 0:
+                        snapshot_section += "### Input Data Files:\n"
+                        for file_info in schema_registry.schemas.values():
+                            if file_info.get('source') == 'input_data':
+                                filename = os.path.basename(file_info['path'])
+                                snapshot = data_manager.get_data_snapshot(filename, max_rows=3, max_cols=15)
+                                snapshot_section += snapshot + "\n"
+
+                    # Get snapshots for task-generated files (if any)
+                    if stats['task_files'] > 0:
+                        snapshot_section += "### Task-Generated Output Files:\n"
+                        for file_info in schema_registry.schemas.values():
+                            if file_info.get('source') == 'task_output':
+                                filename = os.path.basename(file_info['path'])
+                                snapshot = data_manager.get_data_snapshot(filename, max_rows=3, max_cols=15)
+                                snapshot_section += snapshot + "\n"
+
+                    data_columns_info += snapshot_section
+
+                    if logger_manager:
+                        main_logger.info(f"[DataIntrospector] Added rich snapshots for all available data files")
+            except Exception as e:
+                if logger_manager:
+                    main_logger.warning(f"[DataIntrospector] Failed to generate data snapshots: {e}")
+                # Continue without snapshots - schema info is still useful
         elif scanned_files_info:
             # Fallback to original format if registry is empty
             data_columns_info = "\n## Available Data Files and Columns:\n"
