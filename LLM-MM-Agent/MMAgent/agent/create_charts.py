@@ -16,7 +16,7 @@ import json  # 问题2修复：解析JSON响应
 from utils.schema_normalization import assert_syntax_ok
 
 # 问题2修复：导入模板渲染器
-from utils.chart_templates import render_chart_code, get_template_renderer
+# from utils.chart_templates import render_chart_code, get_template_renderer  # BUG: These functions don't exist
 
 # 问题3修复：导入公共路径AutoFix模块
 from utils.path_autofix import apply_path_autofix_with_validation
@@ -26,6 +26,10 @@ try:
     from utils.latent_reporter import LatentReporter
 except ImportError:
     LatentReporter = None  # Graceful degradation if not available
+
+# Template engine imports
+from utils.chart_templates import get_all_templates
+from utils.data_manager import get_data_manager
 
 logger = logging.getLogger(__name__)
 
@@ -717,59 +721,273 @@ class ChartCreator(BaseAgent):
         logger.debug(f"Allowed files: {sorted(self.allowed_files)}")
         logger.debug(f"Data directory: {self.data_dir}")
 
-    def _create_load_csv_function(self):
+    def create_chart_with_template(self, description: str, save_path: str, csv_files: list) -> dict:
         """
-        P0 FIX: 创建白名单load_csv函数
+        [Strategy 2] Template-First Chart Generation.
+
+        This method replaces the legacy 'write python code' approach.
+        Instead of writing code, the LLM selects a template and fills parameters.
+
+        Advantages:
+        1. Zero Syntax Errors (Guard 8 eliminated)
+        2. No pd.read_csv issues (Guard 1 eliminated)
+        3. Guaranteed plt.savefig (File missing eliminated)
+
+        Args:
+            description: Chart description from user
+            save_path: Path to save the generated chart
+            csv_files: List of CSV file paths
 
         Returns:
-            function: load_csv(filename)函数，只允许加载白名单中的文件
+            dict with keys: description, code, image_path, success, error, config
+        """
+        from prompt.chart_template_prompt import TEMPLATE_SELECTION_PROMPT
+        from string import Template
+        from utils.chart_templates import render_chart_code  # NEW: Import the rendering function
+
+        data_manager = get_data_manager()
+
+        # 1. Build data context (Data Snapshot)
+        data_context_str = ""
+        for f in csv_files:
+            filename = os.path.basename(f)
+            try:
+                snapshot = data_manager.get_data_snapshot(filename)
+                data_context_str += snapshot + "\n---\n"
+            except Exception as e:
+                logger.warning(f"Failed to get snapshot for {filename}: {e}")
+                # Fallback: Simple CSV preview if snapshot fails
+                import pandas as pd
+                try:
+                    df = pd.read_csv(f, nrows=2)
+                    data_context_str += f"### Data File: `{filename}`\n"
+                    data_context_str += f"Columns: {list(df.columns)}\n"
+                    data_context_str += f"Preview:\n{df.head(2).to_string()}\n\n"
+                except:
+                    data_context_str += f"### Data File: `{filename}`\nError: Unable to preview\n\n"
+
+        # 2. Build prompt and call LLM (Config Generation)
+        prompt = Template(TEMPLATE_SELECTION_PROMPT).safe_substitute(
+            data_context=data_context_str,
+            user_description=description
+        )
+
+        try:
+            # Call LLM to generate JSON config
+            response = self.llm.generate(prompt)
+
+            # Clean response, extract JSON
+            json_str = self._extract_json_from_response(response)
+            config = json.loads(json_str)
+
+            logger.info(f"[Template] Config generated: {config.get('template_id', 'unknown')} for {config.get('data_file', 'unknown')}")
+
+        except Exception as e:
+            logger.error(f"[Template] Configuration generation failed: {e}")
+            return {'success': False, 'error': f"Config Gen Failed: {e}"}
+
+        # 3. Render code using the new template rendering system
+        try:
+            template_id = config.get('template_id', 'line')
+            csv_file = config.get('data_file')
+            params = config.get('parameters', {})
+
+            # Get full CSV path from data_manager
+            full_csv_path = str(data_manager.get_full_path(csv_file)).replace('\\', '/')
+
+            # Extract parameters
+            x_col = params.get('x_column')
+            y_val = params.get('y_column')
+            y_cols = [y_val] if isinstance(y_val, str) else y_val if y_val else []
+
+            # Handle multi-column plots
+            if template_id in ['multi_line', 'stacked_bar', 'stacked_area']:
+                if 'y_columns' in params:
+                    y_cols = params['y_columns']
+                elif not y_cols:
+                    y_cols = [y_val] if y_val else []
+
+            # Call the new rendering function
+            code = render_chart_code(
+                chart_type=template_id,
+                csv_filename=full_csv_path,
+                x_column=x_col or '',
+                y_columns=y_cols,
+                title=params.get('title', 'Chart'),
+                output_path=save_path.replace('\\', '/'),
+                **params  # Pass kind, bins, etc.
+            )
+
+            logger.info(f"[Template] Code rendered successfully ({len(code)} chars)")
+
+        except Exception as e:
+            logger.error(f"[Template] Code rendering failed: {e}")
+            return {'success': False, 'error': f"Rendering Failed: {e}"}
+
+        # 4. Execute code (Safe Execution)
+        # Reuse existing execute_chart_code, which includes P0 Guard safety checks
+        success, message = self.execute_chart_code(code, save_path)
+
+        return {
+            'description': description,
+            'code': code,
+            'image_path': save_path if success else None,
+            'success': success,
+            'error': message if not success else None,
+            'config': config
+        }
+
+    def _extract_json_from_response(self, text: str) -> str:
+        """
+        Helper function: Extract JSON from LLM response
+
+        Args:
+            text: LLM response text
+
+        Returns:
+            Extracted JSON string
+        """
+        import re
+
+        if "```json" in text:
+            return text.split("```json")[1].split("```")[0].strip()
+        if "```" in text:
+            return text.split("```")[1].split("```")[0].strip()
+
+        # Try to find JSON object
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            return match.group(0)
+
+        return text
+
+    def _create_load_csv_function(self):
+        """
+        P0 FIX: 创建智能白名单load_csv函数（支持模糊匹配）
+
+        Returns:
+            function: load_csv(filename)函数，支持模糊匹配和容错加载
         """
         allowed = self.allowed_files
         data_dir = self.data_dir
 
         def load_csv(filename):
             """
-            白名单CSV加载函数 - 只允许加载预定义的文件
+            智能白名单CSV加载函数 - 支持模糊匹配和多种容错策略
 
             Args:
-                filename: 文件名（必须是白名单中的文件）
+                filename: 文件名（支持模糊匹配）
 
             Returns:
                 DataFrame: 加载的数据框
 
             Raises:
-                ValueError: 如果文件名不在白名单中
+                ValueError: 如果无法找到匹配的文件
             """
             import pandas as pd  # 导入pandas
+            import difflib  # 导入difflib用于模糊匹配
 
-            if filename not in allowed:
-                available = ', '.join(sorted(allowed))
-                raise ValueError(
-                    f"[SECURITY] File '{filename}' not in whitelist. "
-                    f"You must use one of: {available}"
-                )
-            filepath = os.path.join(data_dir, filename)
-            logger.debug(f"load_csv: Loading '{filename}' from '{filepath}'")
+            # 1. 路径安全检查 (Path Sanitization)
+            # 防止 'D:/...' 或 '../...' 逃逸
+            safe_name = os.path.basename(filename)
 
-            # P0-A FIX: Use utf-8-sig to handle BOM, then fallback to latin1
-            try:
-                df = pd.read_csv(filepath, encoding='utf-8-sig')
-            except UnicodeDecodeError:
-                df = pd.read_csv(filepath, encoding='latin1')
+            # 2. 尝试精确匹配 (Exact Match)
+            if safe_name in allowed:
+                filepath = os.path.join(data_dir, safe_name)
+                logger.debug(f"load_csv: Loading '{safe_name}' from '{filepath}'")
+                try:
+                    df = pd.read_csv(filepath, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(filepath, encoding='latin1')
+                # Remove BOM and normalize columns
+                original_columns = df.columns.tolist()
+                df.columns = [col.replace('ï»¿', '').replace('Ï»¿', '').strip() for col in df.columns]
+                df.columns = df.columns.str.upper()
+                logger.debug(f"[P0-A+BOM] Column normalization: {original_columns} → {df.columns.tolist()}")
+                return df
 
-            # P0-A FIX: Remove BOM characters from column names
-            # Handles ï»¿ (UTF-8 BOM) and Ï»¿ (variant)
-            original_columns = df.columns.tolist()
-            df.columns = [col.replace('ï»¿', '').replace('Ï»¿', '').strip() for col in df.columns]
+            # 3. 候选列表匹配 (Candidate Fallback)
+            # 如果文件名带了 'cleaned_' 前缀但找不到，尝试去掉/加上前缀
+            candidates = [safe_name]
+            if safe_name.startswith('cleaned_'):
+                candidates.append(safe_name.replace('cleaned_', 'clean_'))
+            elif safe_name.startswith('clean_'):
+                candidates.append(safe_name.replace('clean_', 'cleaned_'))
+            if safe_name.startswith('summer'):
+                candidates.append(safe_name.replace('summer', 'Summer'))
+            elif safe_name.startswith('Summer'):
+                candidates.append(safe_name.replace('Summer', 'summer'))
 
-            # P0-5 FIX: 统一列名标准化（大写+去空格）
-            # 解决KeyError: 'Year' vs 'YEAR'问题
-            df.columns = df.columns.str.upper()
-            logger.debug(f"[P0-A+BOM] Column normalization: {original_columns} → {df.columns.tolist()}")
+            for cand in candidates:
+                if cand in allowed:
+                    filepath = os.path.join(data_dir, cand)
+                    logger.info(f"load_csv: Auto-corrected filename '{filename}' -> '{cand}'")
+                    try:
+                        df = pd.read_csv(filepath, encoding='utf-8-sig')
+                    except UnicodeDecodeError:
+                        df = pd.read_csv(filepath, encoding='latin1')
+                    # Remove BOM and normalize columns
+                    original_columns = df.columns.tolist()
+                    df.columns = [col.replace('ï»¿', '').replace('Ï»¿', '').strip() for col in df.columns]
+                    df.columns = df.columns.str.upper()
+                    logger.debug(f"[P0-A+BOM] Column normalization: {original_columns} → {df.columns.tolist()}")
+                    return df
 
-            return df
+            # 4. 模糊匹配 (Fuzzy Match) - 最后的救命稻草
+            # 使用 difflib 找最像的文件名
+            matches = difflib.get_close_matches(safe_name, allowed, n=1, cutoff=0.5)
+
+            if matches:
+                best_match = matches[0]
+                filepath = os.path.join(data_dir, best_match)
+                logger.warning(f"!!! [Auto-Fix] Filename typo detected: '{filename}' -> '{best_match}'")
+                try:
+                    df = pd.read_csv(filepath, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(filepath, encoding='latin1')
+                # Remove BOM and normalize columns
+                original_columns = df.columns.tolist()
+                df.columns = [col.replace('ï»¿', '').replace('Ï»¿', '').strip() for col in df.columns]
+                df.columns = df.columns.str.upper()
+                logger.debug(f"[P0-A+BOM] Column normalization: {original_columns} → {df.columns.tolist()}")
+                return df
+
+            # 5. 彻底失败
+            available = ', '.join(sorted(allowed))
+            raise ValueError(
+                f"[SECURITY] File '{filename}' not found in whitelist. "
+                f"You must use one of: {available}"
+            )
 
         return load_csv
+
+    def _create_error_placeholder(self, save_path: str, error_msg: str):
+        """
+        Create a placeholder image with error message when chart generation fails.
+
+        This ensures the PDF generation doesn't crash due to missing image files.
+
+        Args:
+            save_path: Where to save the placeholder image
+            error_msg: Error message to display on the placeholder
+        """
+        try:
+            import matplotlib.pyplot as plt
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.text(0.5, 0.5,
+                   f"CHART GENERATION FAILED\n\n(Legacy Mode Disabled)\n\n{error_msg[:150]}...",
+                   ha='center', va='center', color='red', wrap=True,
+                   fontsize=10, family='monospace')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_facecolor('#f8f8f8')
+            plt.savefig(save_path, dpi=150, bbox_inches='tight',
+                       facecolor='#f8f8f8', edgecolor='red')
+            plt.close()
+            logger.info(f"[Placeholder] Created error placeholder at {save_path}")
+        except Exception as e:
+            logger.warning(f"[Placeholder] Failed to create error placeholder: {e}")
 
     def _validate_column_usage(self, code_str: str, allowed_columns: Set[str]) -> Tuple[bool, List[str]]:
         """
@@ -970,38 +1188,60 @@ class ChartCreator(BaseAgent):
             data_context += "[WARNING] CRITICAL: The following CSV files were generated by the pipeline:\n"
 
             # CRITICAL FIX: Read actual CSV files to get column names and data types
-            import pandas as pd
-            for i, data_file in enumerate(data_files, 1):
-                file_size = os.path.getsize(data_file)
-                data_context += f"{i}. `{os.path.basename(data_file)}` ({file_size:,} bytes)\n"
-                # CRITICAL FIX: Do NOT include full path in prompt - LLM will copy it literally
-                # This causes FileNotFoundError when LLM generates code with wrong absolute paths
+            # =====================================================================
+            # [CRITICAL UPGRADE] Use Data Introspector for "Silver Bullet" accuracy
+            # This replaces manual CSV reading with rich schema + samples + types
+            # =====================================================================
+            from utils.data_manager import get_data_manager
 
-                # Read CSV to get actual column names and sample data
-                try:
-                    # B4 HOTFIX: Use read_csv_safely() with automatic encoding fallback
-                    df_sample = read_csv_safely(data_file, nrows=5)
-                    data_context += f"   **ACTUAL COLUMNS**: {list(df_sample.columns)}\n"
-                    data_context += f"   **SHAPE**: {df_sample.shape}\n"
+            dm = get_data_manager()
+            if dm:
+                logger.info(f"[DataIntrospector] Using rich schema snapshots for {len(data_files)} files")
+                for data_file in data_files:
+                    filename = os.path.basename(data_file)
+                    logger.info(f"[DataIntrospector] Generating snapshot for {filename}")
 
-                    # Add data type info for each column
-                    # CRITICAL FIX: Filter out path fragments from column names to prevent "r'C" KeyError
-                    for col in df_sample.columns:
-                        col_str = str(col).strip()
-                        # Skip columns that look like paths or path fragments
-                        if re.search(r'[A-Za-z]:[/\\]|^r["\']?[A-Za-z]:', col_str):
-                            logger.debug(f"Filtered out path-like column: '{col_str}'")
-                            continue
-                        if len(col_str) > 100:
-                            logger.debug(f"Filtered out suspiciously long column: '{col_str[:50]}...'")
-                            continue
+                    # Generate rich snapshot with schema, types, and samples
+                    snapshot = dm.get_data_snapshot(filename, max_rows=3, max_cols=15)
 
-                        dtype = str(df_sample[col].dtype)
-                        sample_vals = df_sample[col].dropna().head(3).tolist()
-                        data_context += f"      - `{col}` ({dtype}): {sample_vals}\n"
-                except Exception as e:
-                    data_context += f"   **ERROR reading CSV**: {e}\n"
-                    logger.error(f"Failed to read {data_file}: {e}")
+                    # Append snapshot to context
+                    data_context += snapshot
+                    data_context += "\n---\n\n"
+            else:
+                logger.error("[DataIntrospector] DataManager not initialized, using fallback")
+                # Fallback: Manual reading (original logic)
+                import pandas as pd
+                for i, data_file in enumerate(data_files, 1):
+                    file_size = os.path.getsize(data_file)
+                    data_context += f"{i}. `{os.path.basename(data_file)}` ({file_size:,} bytes)\n"
+                    # CRITICAL FIX: Do NOT include full path in prompt - LLM will copy it literally
+                    # This causes FileNotFoundError when LLM generates code with wrong absolute paths
+
+                    # Read CSV to get actual column names and sample data
+                    try:
+                        # B4 HOTFIX: Use read_csv_safely() with automatic encoding fallback
+                        df_sample = read_csv_safely(data_file, nrows=5)
+                        data_context += f"   **ACTUAL COLUMNS**: {list(df_sample.columns)}\n"
+                        data_context += f"   **SHAPE**: {df_sample.shape}\n"
+
+                        # Add data type info for each column
+                        # CRITICAL FIX: Filter out path fragments from column names to prevent "r'C" KeyError
+                        for col in df_sample.columns:
+                            col_str = str(col).strip()
+                            # Skip columns that look like paths or path fragments
+                            if re.search(r'[A-Za-z]:[/\\]|^r["\']?[A-Za-z]:', col_str):
+                                logger.debug(f"Filtered out path-like column: '{col_str}'")
+                                continue
+                            if len(col_str) > 100:
+                                logger.debug(f"Filtered out suspiciously long column: '{col_str[:50]}...'")
+                                continue
+
+                            dtype = str(df_sample[col].dtype)
+                            sample_vals = df_sample[col].dropna().head(3).tolist()
+                            data_context += f"      - `{col}` ({dtype}): {sample_vals}\n"
+                    except Exception as e:
+                        data_context += f"   **ERROR reading CSV**: {e}\n"
+                        logger.error(f"Failed to read {data_file}: {e}")
 
             data_context += "\n[CRITICAL] MANDATORY REQUIREMENTS:\n"
             # P0 FIX: 强制使用load_csv
@@ -2909,17 +3149,17 @@ Do NOT use '{missing_column}' - it doesn't exist!
 
     def create_charts_from_csv_files(self, chart_descriptions: list, save_dir: str, csv_files: list, data_columns_info: str = None):
         """
-        Batch chart generator from CSV files.
+        Batch chart generator from CSV files using TEMPLATE-ONLY approach.
 
-        Thin wrapper around create_chart_with_image() that processes multiple
-        chart descriptions sequentially. Each chart is generated independently,
-        with failures in one chart not affecting others.
+        [Strategy 2: Logic Circuit Breaker]
+        This method ONLY uses template-based generation. Legacy mode fallback has been
+        completely removed to prevent Guard 1 violations and ensure stability.
 
         Args:
             chart_descriptions (list): List of chart description strings
             save_dir (str): Directory to save chart images (created if doesn't exist)
             csv_files (list): List of CSV file paths to use as data sources
-            data_columns_info (str, optional): Pre-extracted column information
+            data_columns_info (str, optional): Pre-extracted column information (unused in template mode)
 
         Returns:
             list: List of chart result dictionaries, one per description.
@@ -2928,7 +3168,8 @@ Do NOT use '{missing_column}' - it doesn't exist!
                       'code': str,
                       'image_path': str,
                       'success': bool,
-                      'error': str
+                      'error': str,
+                      'placeholder': bool  # True if error placeholder was created
                   }
         """
         # NOTE: os is imported at module level (line 5), no need to re-import here
@@ -2937,7 +3178,7 @@ Do NOT use '{missing_column}' - it doesn't exist!
         # Ensure save directory exists
         os.makedirs(save_dir, exist_ok=True)
 
-        print(f"[ChartCreator] Processing {len(chart_descriptions)} charts via create_charts_from_csv_files")
+        print(f"[ChartCreator] Processing {len(chart_descriptions)} charts via TEMPLATE-ONLY mode")
         print(f"[ChartCreator] Save directory: {save_dir}")
         print(f"[ChartCreator] CSV files: {len(csv_files)}")
 
@@ -2953,35 +3194,48 @@ Do NOT use '{missing_column}' - it doesn't exist!
             # Ensures that if Chart N crashes, Chart N+1 still runs.
             # =================================================================================
             try:
-                # Reuse existing single-chart generation logic
-                # This inherits all safety features:
-                # - P0-2 column validation guards
-                # - Automatic retry on failure (max_retries=3)
-                # - Error recovery and code fixing
-                result = self.create_chart_with_image(
-                    chart_description=desc,
-                    save_path=save_path,
-                    data_files=csv_files,
-                    data_columns_info=data_columns_info
-                )
+                # [STRATEGY 2: LOGIC CIRCUIT BREAKER]
+                # ONLY attempt Template Generation - NO fallback to Legacy Mode
+                logger.info(f"[Template] Generating Chart {i+1}...")
+
+                result = self.create_chart_with_template(desc, save_path, csv_files)
+
+                if result['success']:
+                    print(f"     [Template] Chart {i+1} succeeded")
+                else:
+                    # Template failed - create error placeholder instead of falling back
+                    error_msg = result.get('error', 'Unknown error')
+                    print(f"     [Template] Chart {i+1} failed: {error_msg[:100]}...")
+                    print(f"     [Policy] Legacy fallback DISABLED to prevent Guard 1 violations")
+                    print(f"     [Policy] Creating error placeholder to ensure PDF generation continues")
+
+                    # Create placeholder image
+                    self._create_error_placeholder(save_path, error_msg)
+
+                    # Update result to indicate placeholder was created
+                    result['image_path'] = save_path
+                    result['placeholder'] = True
+                    result['original_error'] = error_msg
 
                 # Double check return type safety
                 if not isinstance(result, dict):
                     result = {
                         'description': desc,
                         'code': None,
-                        'image_path': None,
+                        'image_path': save_path,
                         'success': False,
-                        'error': f"Invalid return type from create_chart_with_image: {type(result)}"
+                        'error': f"Invalid return type from create_chart_with_template: {type(result)}",
+                        'placeholder': True
                     }
 
                 results.append(result)
 
                 # Log result
                 if result.get('success'):
-                    print(f"     ✓ Chart {i+1} succeeded: {result.get('image_path')}")
+                    print(f"     Chart {i+1} succeeded: {result.get('image_path')}")
                 else:
-                    print(f"     ✗ Chart {i+1} failed: {result.get('error', 'Unknown error')}")
+                    status = "placeholder" if result.get('placeholder') else "failed"
+                    print(f"     Chart {i+1} {status}: {result.get('image_path')}")
 
             except Exception as e:
                 # [最后的防线] 捕获所有漏网之鱼

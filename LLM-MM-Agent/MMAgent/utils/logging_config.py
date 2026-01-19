@@ -42,6 +42,24 @@ class MMExperimentLogger:
         return self.output_dir
     # =========================================================================
 
+    def __getattr__(self, name):
+        """
+        [Safety Net] Dynamic interception of undefined directory attributes.
+        If code accesses xxx_dir but it doesn't exist, default to log_dir
+        with a warning instead of crashing.
+
+        This prevents future AttributeErrors if more directory attributes
+        are added/removed during refactoring.
+        """
+        if name.endswith('_dir'):
+            import logging
+            logging.warning(f"[DeprecationWarning] Accessing missing attribute '{name}' on MMExperimentLogger. Falling back to log_dir.")
+            return self.log_dir
+
+        # For non-_dir attributes, raise the normal AttributeError
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+    # =========================================================================
+
     def _setup_loggers(self, console_level):
         """Configure SINGLE debug logger for all events."""
         # [MODIFIED] Only create ONE debug.log

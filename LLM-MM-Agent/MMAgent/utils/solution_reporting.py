@@ -71,7 +71,7 @@ def escape_latex_special_chars(text: str) -> str:
     - _ (subscript)
     - ^ (superscript)
     - ~ (non-breakable space)
-    - \ (line break)
+    - \\ (line break)
     - { } (grouping)
     """
     if not isinstance(text, str):
@@ -96,7 +96,6 @@ def escape_latex_special_chars(text: str) -> str:
     }
 
     # Use regex for single-pass replacement (more efficient, prevents recursive replacement)
-    import re
     regex = re.compile('|'.join(re.escape(key) for key in latex_escapes.keys()))
 
     def replace_match(match):
@@ -645,12 +644,14 @@ class LatexDocumentAssembler:
     
     def _add_figure(self, figures: List[str], latex_dir: Optional[str] = None) -> str:
         """
-        Add a figure to the content.
+        Add a figure to the content with graceful degradation.
 
         CRITICAL FIX: Handle missing/failed chart files gracefully.
-        If a figure file doesn't exist, use a placeholder instead of failing the entire LaTeX compilation.
+        If a figure file doesn't exist, use a TikZ-drawn placeholder instead of failing.
 
         CRITICAL FIX 2: Use latex_dir for existence checks (relative paths need resolution).
+
+        Tier 3 Defense: Source Quality Control - detect missing figures at generation time
         """
         figure_str: List[str] = []
         base_dir = latex_dir or '.'
@@ -662,22 +663,20 @@ class LatexDocumentAssembler:
                 abs_path = os.path.join(base_dir, figure_path)
 
             if not os.path.exists(abs_path):
-                # Figure file missing - use placeholder
+                # Figure file missing - use TikZ-drawn placeholder (Tier 3 Defense)
                 name = os.path.splitext(os.path.basename(figure_path))[0].replace('_', '\\_')
-                print(f"[WARN] Figure file not found: {figure_path} (resolved: {abs_path}) - using placeholder")
+                print(f"[WARN] Figure file not found: {figure_path} (resolved: {abs_path}) - using TikZ placeholder")
                 figure_str.append(f"""
 \\begin{{figure}}[H]
 \\centering
-\\fbox{{\\begin{{minipage}}{{0.8\\textwidth}}
-\\centering
-\\vspace{{1cm}}
-\\textbf{{Figure Not Available}}
-\\par
-\\vspace{{0.5cm}}
-\\textit{{The chart for ``{name}'' could not be generated.}}
-\\par
-\\vspace{{1cm}}
-\\end{{minipage}}}}
+\\begin{{tikzpicture}}
+    \\draw[red, thick, dashed] (0,0) rectangle (10,6);
+    \\node[align=center, text width=8cm] at (5,3) {{
+        \\textbf{{MISSING FIGURE}}\\\\
+        \\texttt{{{name}}}\\\\
+        \\small{{Chart generation failed - file not found}}
+    }};
+\\end{{tikzpicture}}
 \\caption{{{name} (chart generation failed)}}
 \\end{{figure}}
 """)
@@ -764,6 +763,7 @@ def main1():
 \\usepackage{{float}}     % For [H] placement specifier
 \\usepackage{{listings}}  % For \\lstlisting code environment
 \\usepackage{{xcolor}}    % For listings coloring
+\\usepackage{{tikz}}      % For drawing figure placeholders (Tier 3 Defense)
 
 \\usepackage{{lastpage}}
 \\renewcommand{{\\cftdot}}{{.}}
@@ -821,7 +821,18 @@ def main1():
                 body_parts.append(chapter.content)
 
         body_parts.append("\\section{References}")
-        body_parts += self._add_code(metadata['codes'])
+        # CRITICAL FIX: Handle missing 'codes' key with safe fallback
+        if 'codes' in metadata:
+            body_parts += self._add_code(metadata['codes'])
+        elif 'codes' in json_data:
+            body_parts += self._add_code(json_data['codes'])
+        else:
+            # Create fallback code section if 'codes' key is completely missing
+            body_parts.append("\\section{Appendix}")
+            body_parts.append("\\subsection{Appendix}")
+            body_parts.append("% No code files were provided")
+            body_parts.append("\\subsection{Python Code}")
+            body_parts.append("\\texttt{No code was generated for this task.}")
         return "\n\n".join(body_parts)
 
 # --------------------------------
@@ -838,6 +849,121 @@ class FileManager:
         with open(filepath, 'w') as f:
             f.write(content)
         print(f"Document saved to {filepath}")
+
+    @staticmethod
+    def _heuristic_repair_tex(tex_content: str, log_content: str) -> tuple[str, bool]:
+        """
+        Rule-based LaTeX auto-repair engine (fast, zero-token cost).
+
+        This implements "Tier 2 Defense" - Heuristic Repair before calling LLM.
+        Solves common compilation errors instantly without expensive LLM calls.
+
+        Args:
+            tex_content: Original LaTeX source
+            log_content: pdflatex output log
+
+        Returns:
+            (fixed_content, was_modified)
+
+        Repair Strategies:
+            1. Missing figure files -> Comment out \\includegraphics
+            2. Undefined colors -> Inject fallback definitions
+            3. Misplaced & characters -> Escape in non-table contexts
+            4. Missing packages -> Inject required \\usepackage
+        """
+        modified = False
+        new_content = tex_content
+
+        # Strategy 1: Remove missing figure references
+        # Error pattern: ! LaTeX Error: File `xxx' not found.
+        if "File `" in log_content and "not found" in log_content:
+            print("[Auto-Repair] Detecting missing figures...")
+            missing_files = re.findall(r"File `(.*?)' not found", log_content)
+            for fname in missing_files:
+                # Comment out \includegraphics lines referencing this file
+                pattern = re.compile(r"(\\includegraphics.*?\{" + re.escape(fname) + r"\})")
+                if pattern.search(new_content):
+                    new_content = pattern.sub(
+                        r"% \1 (Image missing, commented out by Auto-Repair)",
+                        new_content
+                    )
+                    print(f"  -> Commented out reference to missing file: {fname}")
+                    modified = True
+
+        # Strategy 2: Fix undefined colors
+        # Error pattern: ! LaTeX Error: Undefined color `xxx'.
+        if "Undefined color" in log_content:
+            print("[Auto-Repair] Fixing undefined colors...")
+            undefined_colors = re.findall(r"Undefined color `(\w+)'", log_content)
+            if undefined_colors and "\\begin{document}" in new_content:
+                # Inject common color definitions
+                color_defs = []
+                for color in undefined_colors:
+                    # Map common color names to HTML values
+                    color_map = {
+                        'HtmlBlue': '0000FF',
+                        'HtmlRed': 'FF0000',
+                        'HtmlGreen': '008000',
+                        'HtmlBlack': '000000',
+                    }
+                    if color in color_map:
+                        color_defs.append("\\definecolor{{{color}}}{{HTML}}{{{hex}}}".format(color=color, hex=color_map[color]))
+                    else:
+                        # Fallback to gray
+                        color_defs.append("\\definecolor{{{color}}}{{HTML}}{{808080}}".format(color=color))
+
+                if color_defs:
+                    preamble_end = "\\begin{document}"
+                    new_content = new_content.replace(
+                        preamble_end,
+                        "\n".join(color_defs) + "\n" + preamble_end
+                    )
+                    print(f"  -> Injected {len(color_defs)} fallback color definitions")
+                    modified = True
+
+        # Strategy 3: Fix misplaced & alignment characters
+        # Error pattern: ! Misplaced alignment tab character &.
+        if "Misplaced alignment tab character &" in log_content:
+            print("[Auto-Repair] Fixing unescaped & characters...")
+            lines = new_content.split('\n')
+            for i, line in enumerate(lines):
+                # Only escape & if we're NOT in a table context
+                if '&' in line and '\\\\' not in line and 'tabular' not in line and 'align' not in line:
+                    # Check if this line looks like table content
+                    if '&' in line:
+                        # Count & signs - tables usually have multiple
+                        amp_count = line.count('&')
+                        if amp_count == 1:
+                            # Single & is likely a typo, escape it
+                            lines[i] = line.replace('&', r'\&')
+                            modified = True
+            new_content = '\n'.join(lines)
+            if modified:
+                print("  -> Escaped misplaced & characters")
+
+        # Strategy 4: Fix missing TikZ package (for our figure placeholders)
+        if "Undefined control sequence \\draw" in log_content or "Undefined control sequence \\node" in log_content:
+            if "\\usepackage{tikz}" not in new_content:
+                print("[Auto-Repair] Adding missing tikz package...")
+                new_content = new_content.replace(
+                    "\\usepackage{graphicx}",
+                    "\\usepackage{graphicx}\n\\usepackage{tikz}"
+                )
+                print("  -> Injected \\usepackage{tikz}")
+                modified = True
+
+        # Strategy 5: Fix missing float package [H] specifier
+        if "LaTeX Error: \\begin{figure}[H]" in log_content:
+            if "\\usepackage{float}" not in new_content:
+                print("[Auto-Repair] Adding missing float package...")
+                new_content = new_content.replace(
+                    "\\usepackage{graphicx}",
+                    "\\usepackage{graphicx}\n\\usepackage{float}"
+                )
+                print("  -> Injected \\usepackage{float}")
+                modified = True
+
+        return new_content, modified
 
     @staticmethod
     def extract_latex_errors(log_output: str) -> list:
@@ -1080,21 +1206,38 @@ Fixed LaTeX:"""
                             print(f"[INFO] Total iterations: {iteration}")
                         return True
 
-                # Compilation failed - check if we should retry with LLM fixing
+                # Compilation failed - attempt repair with tiered strategy
+                # TIER 1: Heuristic Repair (Rule-based, zero-token cost)
+                # TIER 2: LLM Repair (Deep understanding, token cost)
+
+                combined_output = result1.stdout + result1.stderr
+
+                # Try heuristic repair first (Tier 1)
+                print("[INFO] Attempting heuristic repair (Tier 1)...")
+                fixed_latex, was_modified = FileManager._heuristic_repair_tex(
+                    current_latex, combined_output
+                )
+
+                if was_modified:
+                    print("[OK] Heuristic repair applied - retrying compilation")
+                    current_latex = fixed_latex
+                    continue  # Skip LLM, go directly to next compilation
+
+                # Heuristic repair failed or couldn't fix - try LLM repair (Tier 2)
                 if llm is None:
-                    print("[WARNING] Compilation failed and no LLM provided")
-                    FileManager._print_compilation_errors(result1, latex_path)  # P2-2 FIX: Pass latex_path
+                    print("[WARNING] Heuristic repair failed and no LLM provided")
+                    FileManager._print_compilation_errors(result1, latex_path)
                     return False
 
-                # Extract errors
-                combined_output = result1.stdout + result1.stderr
+                # Extract errors for LLM
                 errors = FileManager.extract_latex_errors(combined_output)
 
                 if not errors:
                     print("[WARNING] No clear errors found in output")
-                    FileManager._print_compilation_errors(result1, latex_path)  # P2-2 FIX: Pass latex_path
+                    FileManager._print_compilation_errors(result1, latex_path)
                     return False
 
+                print(f"[INFO] Heuristics failed - requesting LLM repair (Tier 2)...")
                 print(f"[INFO] Found {len(errors)} error(s), attempting LLM fix...")
 
                 # Show first few errors
@@ -1354,6 +1497,21 @@ def generate_paper(llm, output_dir, name):
                         # Last resort: use absolute path (higher risk in LaTeX)
                         fig_rel = f.as_posix()
                 metadata['figures'].append(fig_rel)
+
+    # CRITICAL FIX: Collect code files for LaTeX appendix
+    # This fixes KeyError: 'codes' in _create_body method
+    metadata['codes'] = []
+    if code_dir.is_dir():
+        for f in sorted(code_dir.iterdir()):  # Sort for consistent ordering
+            if f.suffix.lower() == '.py':
+                # Use relative path from latex dir
+                try:
+                    code_rel = f.relative_to(latex_dir).as_posix()
+                except ValueError:
+                    # If code is not under latex_dir, use absolute path
+                    code_rel = str(f)
+                metadata['codes'].append(code_rel)
+        print(f"[INFO] Found {len(metadata['codes'])} Python code files")
 
     # CRITICAL FIX: Check for failed charts and log them
     # Read the JSON solution to check which charts failed

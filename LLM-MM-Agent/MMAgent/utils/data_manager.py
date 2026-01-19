@@ -406,6 +406,126 @@ class DataManager:
             f"  - {data_path}"
         )
 
+    # =========================================================================
+    # [CRITICAL UPGRADE] Data Introspection Module - "Silver Bullet" for KeyError
+    # =========================================================================
+
+    def get_data_snapshot(self, filename: str, max_rows: int = 3, max_cols: int = 15) -> str:
+        """
+        获取数据的"全息指纹"，用于构建高精度的 Prompt 上下文。
+
+        This is the "Silver Bullet" that solves KeyError issues by giving the LLM
+        actual data schema, types, and samples instead of just filenames.
+
+        功能 (Features):
+        1. 物理读取 CSV，彻底消除列名幻觉 (KeyError: YEAR vs Year)
+        2. 提供数据类型 (int/float/object)，防止类型错误 (TypeError)
+        3. 提供真实样本 (Sample Rows)，帮助 LLM 理解数据语义
+
+        Args:
+            filename: CSV 文件名 (必须在 whitelist 中)
+            max_rows: 预览行数 (default: 3)
+            max_cols: 最大列数 (default: 15, prevents token overflow on wide tables)
+
+        Returns:
+            Formatted Markdown String with schema, types, and sample data
+        """
+        import io
+        import pandas as pd
+
+        try:
+            # 1. Resolve file path (try work_dir first, then data_dir)
+            file_path = None
+
+            # Priority 1: work_dir (task-generated outputs)
+            if self.work_dir and (self.work_dir / filename).exists():
+                file_path = self.work_dir / filename
+            # Priority 2: data_dir (canonical input data)
+            elif self.get_full_path(filename).exists():
+                file_path = self.get_full_path(filename)
+            else:
+                return f"⚠️ [Data Snapshot Error] File not found: {filename}"
+
+            # 2. Read data with safe encoding (same as code execution)
+            try:
+                df = pd.read_csv(file_path, encoding='utf-8-sig')
+            except UnicodeDecodeError:
+                df = pd.read_csv(file_path, encoding='latin1')
+
+            # 3. Apply column standardization (same as code execution)
+            # Use local standardize_column_names function (defined in this file)
+            df = standardize_column_names(df)
+
+            # 4. Build snapshot information
+            buffer = io.StringIO()
+            buffer.write(f"### 📊 Dataset: `{filename}`\n")
+            buffer.write(f"- **Dimensions**: {df.shape[0]} rows × {df.shape[1]} columns\n")
+
+            # 5. Schema & Data Types Analysis
+            buffer.write("\n#### 1. Schema & Data Types:\n")
+            buffer.write("| Column Name | Type | Non-Null | Sample Value |\n")
+            buffer.write("|:---|:---|:---|:---|\n")
+
+            # Control columns to prevent token explosion
+            cols_to_show = df.columns[:max_cols]
+
+            for col in cols_to_show:
+                # Get data type
+                dtype = str(df[col].dtype)
+                # Get non-null count
+                non_null = f"{df[col].count()}/{len(df)}"
+                # Get sample value (first non-null)
+                valid_samples = df[col].dropna()
+                sample_val = valid_samples.iloc[0] if not valid_samples.empty else "N/A"
+
+                # Truncate long sample values
+                sample_str = str(sample_val)
+                if len(sample_str) > 50:
+                    sample_str = sample_str[:47] + "..."
+
+                buffer.write(f"| `{col}` | `{dtype}` | {non_null} | `{sample_str}` |\n")
+
+            if len(df.columns) > max_cols:
+                buffer.write(f"| ... ({len(df.columns) - max_cols} more columns) | ... | ... | ... |\n")
+
+            # 6. Data Preview (First N Rows)
+            buffer.write("\n#### 2. First 3 Rows (Markdown Preview):\n")
+
+            # Handle wide table truncation
+            df_preview = df.head(max_rows)
+            if len(df.columns) > max_cols:
+                df_preview = df_preview.iloc[:, :max_cols].copy()
+                df_preview['...'] = '...'
+
+            # Use to_markdown if tabulate available, else to_string
+            try:
+                markdown_table = df_preview.to_markdown(index=False)
+                buffer.write(markdown_table)
+            except ImportError:
+                # Fallback: use string representation
+                buffer.write(df_preview.to_string(index=False))
+
+            buffer.write("\n\n")
+
+            # 7. Statistical Summary (for numeric columns only)
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            if not numeric_cols.empty and len(numeric_cols) <= max_cols:
+                buffer.write("#### 3. Numeric Stats (Distribution):\n")
+                desc = df[numeric_cols].describe().loc[['min', 'mean', 'max']].T
+                try:
+                    buffer.write(desc.to_markdown())
+                except ImportError:
+                    buffer.write(desc.to_string())
+                buffer.write("\n")
+
+            logger.info(f"[DataIntrospector] Snapshot generated for {filename} ({len(buffer.getvalue())} chars)")
+            return buffer.getvalue()
+
+        except Exception as e:
+            error_msg = f"❌ Error generating snapshot for {filename}: {str(e)}"
+            logger.error(error_msg)
+            return error_msg
+
 
 # Global instance (will be initialized in main.py)
 _data_manager: Optional[DataManager] = None
